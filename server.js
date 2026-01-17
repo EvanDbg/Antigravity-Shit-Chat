@@ -91,6 +91,7 @@ async function captureSnapshot(cdp) {
         if (!cascade) return { error: 'cascade not found' };
         
         const cascadeStyles = window.getComputedStyle(cascade);
+        const bodyStyles = window.getComputedStyle(document.body);
         
         // Clone cascade to modify it without affecting the original
         const clone = cascade.cloneNode(true);
@@ -117,7 +118,9 @@ async function captureSnapshot(cdp) {
             css: allCSS,
             backgroundColor: cascadeStyles.backgroundColor,
             color: cascadeStyles.color,
-            fontFamily: cascadeStyles.fontFamily
+            fontFamily: cascadeStyles.fontFamily,
+            bodyBg: bodyStyles.backgroundColor,
+            bodyColor: bodyStyles.color
         };
     })()`;
 

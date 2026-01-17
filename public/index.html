@@ -266,21 +266,39 @@
                 const scrollPos = chatContainer.scrollTop;
                 const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 100;
 
+                // Apply body background from Antigravity (cascade is transparent)
+                const bodyBg = data.bodyBg || '#1e1e1e';
+                const bodyColor = data.bodyColor || '#cccccc';
+
+                // Apply to webview body too
+                document.body.style.backgroundColor = bodyBg;
+                document.body.style.color = bodyColor;
+
                 // Update content
                 chatContent.innerHTML = `
                     <style>
                         ${data.css}
                         
-                        /* Override positioning */
-                        * {
-                            position: static !important;
-                        }
+                        /* Apply actual theme colors from Antigravity */
                         #cascade {
+                            background-color: ${bodyBg};
+                            color: ${bodyColor};
                             position: relative !important;
                         }
                         
-                        /* Fix code block backgrounds and text */
-                        pre, code {
+                        /* Override positioning for everything else */
+                        #cascade * {
+                            position: static !important;
+                        }
+                        
+                        /* Force text color on cascade children, but NOT code blocks (preserve syntax highlighting) */
+                        #cascade *:not(pre):not(code):not(pre *):not([class*="hljs"]):not([class*="shiki"]):not([class*="token"]) {
+                            color: ${bodyColor};
+                        }
+                        
+                        /* Code blocks stay dark regardless of theme */
+                        pre, code, #cascade pre, #cascade code,
+                        [class*="hljs"], [class*="shiki"] {
                             background-color: #1e1e1e !important;
                             color: #d4d4d4 !important;
                         }
@@ -289,31 +307,10 @@
                             background-color: transparent !important;
                         }
                         
-                        /* Fix terminal/console backgrounds */
-                        [class*="terminal"], [class*="console"], [class*="output"] {
+                        /* Terminal/console areas */
+                        [class*="terminal"], [class*="console"] {
                             background-color: #1e1e1e !important;
                             color: #d4d4d4 !important;
-                        }
-                        
-                        /* Fix any dark text on dark backgrounds */
-                        #cascade [style*="background-color: rgb(0, 0, 0)"],
-                        #cascade [style*="background-color: black"],
-                        #cascade [style*="background: rgb(0, 0, 0)"],
-                        #cascade [style*="background: black"] {
-                            color: #d4d4d4 !important;
-                        }
-                        
-                        /* Ensure code syntax highlighting is visible */
-                        .token, .hljs {
-                            color: inherit !important;
-                        }
-                        
-                        /* Fix any elements with explicit dark backgrounds */
-                        [style*="background-color:#000"],
-                        [style*="background-color: #000"],
-                        [style*="background:#000"],
-                        [style*="background: #000"] {
-                            background-color: #1e1e1e !important;
                         }
                     </style>
                     ${data.html}
