@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import net from 'net';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { spawn } from 'child_process';
+import { spawn, exec } from 'child_process';
 import { createHmac, randomBytes } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 
@@ -31,8 +32,21 @@ const POLL_INTERVAL = 3000;
 // Auth config (config.json > env vars > defaults)
 const AUTH_PASSWORD = userConfig.password || process.env.PASSWORD || 'shitchat';
 const AUTH_SECRET = process.env.AUTH_SECRET || randomBytes(32).toString('hex');
-const ANTIGRAVITY_PATH = userConfig.antigravityPath || process.env.ANTIGRAVITY_PATH ||
-    join(process.env.LOCALAPPDATA || 'C:\\Users\\EVAN\\AppData\\Local', 'Programs', 'Antigravity', 'Antigravity.exe');
+function getDefaultAntigravityPath() {
+    if (process.platform === 'darwin') {
+        // macOS: standard .app bundle locations
+        const candidates = [
+            '/Applications/Antigravity.app/Contents/MacOS/Antigravity',
+            join(process.env.HOME || '', 'Applications', 'Antigravity.app', 'Contents', 'MacOS', 'Antigravity')
+        ];
+        return candidates.find(p => existsSync(p)) || candidates[0];
+    }
+    // Windows
+    return join(process.env.LOCALAPPDATA || 'C:\\Users\\EVAN\\AppData\\Local',
+        'Programs', 'Antigravity', 'Antigravity.exe');
+}
+
+const ANTIGRAVITY_PATH = userConfig.antigravityPath || process.env.ANTIGRAVITY_PATH || getDefaultAntigravityPath();
 
 // Application State
 let cascades = new Map();
@@ -64,6 +78,33 @@ function parseCookies(cookieHeader) {
 }
 
 // --- Helpers ---
+
+function checkPort(port) {
+    return new Promise((resolve) => {
+        const socket = new net.Socket();
+        socket.setTimeout(400);
+        socket.on('connect', () => { socket.destroy(); resolve(true); });
+        socket.on('timeout', () => { socket.destroy(); resolve(false); });
+        socket.on('error', () => { socket.destroy(); resolve(false); });
+        socket.connect(port, '127.0.0.1');
+    });
+}
+
+function checkProcessRunning(name) {
+    return new Promise((resolve) => {
+        const cmd = process.platform === 'darwin'
+            ? `pgrep -f "${name}.app/Contents/MacOS/${name}"`
+            : `tasklist /FI "IMAGENAME eq ${name}.exe" /NH`;
+        exec(cmd, (err, stdout) => {
+            if (err) return resolve(false);
+            if (process.platform === 'win32') {
+                resolve(stdout.toLowerCase().includes(name.toLowerCase()));
+            } else {
+                resolve(stdout.trim().length > 0);
+            }
+        });
+    });
+}
 
 // Simple hash function
 function hashString(str) {
@@ -449,17 +490,57 @@ async function main() {
     app.use(express.static(join(__dirname, 'public')));
 
     // --- Launch Antigravity ---
-    app.post('/api/launch', (req, res) => {
+    app.post('/api/launch', async (req, res) => {
         try {
             const port = req.body.port || 9000;
-            const child = spawn(ANTIGRAVITY_PATH, [`--remote-debugging-port=${port}`], {
-                detached: true,
-                stdio: 'ignore',
-                windowsHide: false
-            });
-            child.unref();
-            console.log(`馃殌 Launched Antigravity (PID: ${child.pid}, CDP port: ${port})`);
-            res.json({ success: true, pid: child.pid, port });
+            const [portOpen, processRunning] = await Promise.all([
+                checkPort(port),
+                checkProcessRunning('Antigravity')
+            ]);
+
+            console.log(`🔍 Status: process=${processRunning ? 'running' : 'stopped'}, port=${portOpen ? 'open' : 'closed'}`);
+
+            // Case 1: Port already open → already connected, nothing to do
+            if (portOpen) {
+                return res.json({ success: true, port, message: 'Already connected' });
+            }
+
+            // Case 2: Process running but port closed → must restart with debug flags
+            if (processRunning) {
+                console.warn('⚠️ Antigravity is running but debug port is not open.');
+                return res.json({ success: false, error: 'RESTART_REQUIRED' });
+            }
+
+            // Case 3: Not running, not listening → fresh launch
+            console.log(`🚀 Launching Antigravity on port ${port}...`);
+
+            let child;
+            if (process.platform === 'darwin') {
+                child = spawn('open', ['-a', 'Antigravity', '--args', `--remote-debugging-port=${port}`], {
+                    detached: true,
+                    stdio: 'ignore'
+                });
+            } else {
+                child = spawn(ANTIGRAVITY_PATH, [`--remote-debugging-port=${port}`], {
+                    detached: true,
+                    stdio: 'ignore',
+                    windowsHide: false
+                });
+            }
+            if (child) child.unref();
+
+            // Wait for port to open (app startup takes a few seconds)
+            let attempts = 15;
+            while (attempts-- > 0) {
+                await new Promise(r => setTimeout(r, 1000));
+                if (await checkPort(port)) {
+                    console.log(`🔥 Antigravity port ${port} is now open! (PID: ${child?.pid})`);
+                    return res.json({ success: true, pid: child?.pid, port });
+                }
+            }
+
+            res.json({ success: false, error: 'TIMEOUT' });
+
         } catch (e) {
             console.error('Launch failed:', e.message);
             res.status(500).json({ error: e.message });

@@ -58,11 +58,23 @@ cp config.example.json config.json
 |-------|-------------|---------|
 | `password` | Login password | `shitchat` |
 | `port` | Web server port | `3563` |
-| `antigravityPath` | Path to Antigravity.exe (empty = auto-detect) | Auto |
+| `antigravityPath` | Path to Antigravity executable (empty = auto-detect) | Auto |
 | `cdpPorts` | CDP ports to scan for Antigravity instances | `[9000-9003]` |
+
+> **Auto-detect paths:**
+> - **macOS**: `/Applications/Antigravity.app/Contents/MacOS/Antigravity` or `~/Applications/...`
+> - **Windows**: `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`
 
 ### 3. Start Antigravity with CDP
 
+**macOS:**
+```bash
+open -a Antigravity --args --remote-debugging-port=9000
+```
+
+> **Note:** If Antigravity is already running, `open` will just activate the window and ignore the arguments. You must **Quit Antigravity (Cmd+Q)** fully before running this command.
+
+**Windows:**
 ```bash
 antigravity . --remote-debugging-port=9000
 ```

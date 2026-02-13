@@ -508,10 +508,20 @@
                         }
                     }, 3000);
                 } else {
-                    if (btn) {
-                        btn.textContent = '❌ Launch failed';
-                        setTimeout(() => { btn.disabled = false; btn.textContent = '🚀 Launch Antigravity'; }, 3000);
+                    if (data.error === 'RESTART_REQUIRED') {
+                        if (btn) {
+                            btn.textContent = '⚠️ Restart Required';
+                            alert("Antigravity is already running without remote debugging.\n\nPlease Quit Antigravity (Cmd+Q) manually, then click Launch again.");
+                        }
+                    } else {
+                        if (btn) btn.textContent = '❌ Launch failed';
                     }
+                    setTimeout(() => { 
+                         if (btn) {
+                            btn.disabled = false; 
+                            btn.textContent = '🚀 Launch Antigravity'; 
+                         }
+                    }, 3000);
                 }
             } catch (err) {
                 console.error('Launch error:', err);
