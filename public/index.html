@@ -481,20 +481,45 @@
                 const data = await res.json();
                 if (data.success) {
                     if (btn) btn.textContent = '✅ Launched! Waiting for connection...';
+                    // Poll /cascades until Antigravity connects
+                    let attempts = 0;
+                    const maxAttempts = 20; // 20 * 3s = 60s max
+                    const pollTimer = setInterval(async () => {
+                        attempts++;
+                        if (btn) btn.textContent = `⏳ Detecting Antigravity... (${attempts * 3}s)`;
+                        try {
+                            const r = await fetch('/cascades');
+                            if (r.ok) {
+                                const list = await r.json();
+                                if (list.length > 0) {
+                                    clearInterval(pollTimer);
+                                    if (btn) btn.textContent = '✅ Connected! Refreshing...';
+                                    setTimeout(() => window.location.reload(), 500);
+                                    return;
+                                }
+                            }
+                        } catch (_) { }
+                        if (attempts >= maxAttempts) {
+                            clearInterval(pollTimer);
+                            if (btn) {
+                                btn.disabled = false;
+                                btn.textContent = '🚀 Launch Antigravity';
+                            }
+                        }
+                    }, 3000);
                 } else {
-                    if (btn) btn.textContent = '❌ Launch failed';
+                    if (btn) {
+                        btn.textContent = '❌ Launch failed';
+                        setTimeout(() => { btn.disabled = false; btn.textContent = '🚀 Launch Antigravity'; }, 3000);
+                    }
                 }
             } catch (err) {
                 console.error('Launch error:', err);
-                if (btn) btn.textContent = '❌ Launch failed';
-            }
-            // Re-enable after delay
-            setTimeout(() => {
                 if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = '🚀 Launch Antigravity';
+                    btn.textContent = '❌ Launch failed';
+                    setTimeout(() => { btn.disabled = false; btn.textContent = '🚀 Launch Antigravity'; }, 3000);
                 }
-            }, 5000);
+            }
         }
         // Make it available to onclick
         window.launchAntigravity = launchAntigravity;
