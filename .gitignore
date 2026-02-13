@@ -23,3 +23,11 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+
+# Config (contains password)
+config.json
+
+# Diagnostic files
+explore_*.json
+cdp_*.json
+diagnose.mjs

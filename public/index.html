@@ -119,6 +119,130 @@
             color: #666;
             margin-top: 50px;
         }
+
+        /* Click passthrough: make IDE buttons clickable */
+        [data-cdp-click] {
+            cursor: pointer !important;
+            position: relative;
+            transition: opacity 0.15s, box-shadow 0.15s;
+        }
+
+        [data-cdp-click]:hover {
+            opacity: 0.85;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+            border-radius: 4px;
+        }
+
+        [data-cdp-click].cdp-clicking {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .new-conv-btn {
+            padding: 0 12px;
+            background: transparent;
+            border: 1px solid #3a3a3a;
+            color: #999;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        .new-conv-btn:hover {
+            background: #333;
+            color: #fff;
+            border-color: #3b82f6;
+        }
+
+        /* Offline / Empty state */
+        .offline-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 300px;
+            color: #888;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .offline-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.6;
+        }
+
+        .offline-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #ccc;
+            margin-bottom: 8px;
+        }
+
+        .offline-msg {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+
+        .launch-btn {
+            padding: 10px 24px;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .launch-btn:hover {
+            opacity: 0.9;
+        }
+
+        .launch-btn:active {
+            transform: scale(0.97);
+        }
+
+        .launch-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        .status-dot.connected {
+            background: #4ade80;
+        }
+
+        .status-dot.disconnected {
+            background: #f87171;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
     </style>
     <style id="cascade-style">
         /* Dynamic styles will be injected here */
@@ -127,9 +251,11 @@
 
 <body>
 
-    <div class="headers-container" id="tabsContainer">
-        <!-- Tabs injected here -->
-        <div class="cascade-tab">Loading...</div>
+    <div class="headers-container">
+        <div id="tabsContainer" style="display:flex;flex:1;overflow-x:auto;">
+            <div class="cascade-tab">Loading...</div>
+        </div>
+        <div class="new-conv-btn" id="newConvBtn" title="New Conversation">＋</div>
     </div>
 
     <div class="chat-container" id="chatContainer">
@@ -188,7 +314,18 @@
             `).join('');
 
             if (cascades.length === 0) {
-                tabsContainer.innerHTML = '<div class="cascade-tab">No chats found</div>';
+                tabsContainer.innerHTML = '<div class="cascade-tab"><span class="status-dot disconnected"></span>No active sessions</div>';
+                chatContent.innerHTML = `
+                    <div class="offline-state">
+                        <div class="offline-icon">🔌</div>
+                        <div class="offline-title">Antigravity is not running</div>
+                        <div class="offline-msg">
+                            No Antigravity IDE instance detected.<br>
+                            Launch one to start chatting, or wait for auto-discovery.
+                        </div>
+                        <button class="launch-btn" onclick="launchAntigravity()">🚀 Launch Antigravity</button>
+                    </div>
+                `;
             }
         }
 
@@ -206,11 +343,12 @@
                     const styleData = await styleRes.json();
                     document.getElementById('cascade-style').textContent = `
                         ${styleData.css}
-                        #cascade { 
+                        /* Support both legacy #cascade and new #conversation/#chat */
+                        #cascade, #conversation, #chat, #chat-viewport { 
                             background: transparent !important; 
                             color: white !important; 
                         }
-                        #cascade .prose {
+                        #cascade .prose, #conversation .prose, #chat-viewport .prose {
                             --tw-prose-body: #e5e7eb !important;
                             --tw-prose-headings: #f3f4f6 !important;
                             --tw-prose-lead: #e5e7eb !important;
@@ -227,7 +365,7 @@
                             --tw-prose-pre-bg: #1f2937 !important;
                             --tw-prose-th-borders: #374151 !important;
                             --tw-prose-td-borders: #374151 !important;
-                            color: #e5e7eb !important; /* Force color explicitly too */
+                            color: #e5e7eb !important;
                         }
                         /* Ensure code blocks are readable */
                         pre, code { background: #111 !important; color: #ddd !important; }
@@ -249,8 +387,8 @@
                 const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 50;
 
                 document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
-                chatContent.innerHTML = data.html;
-                // No inner style block needed anymore
+                // Wrap content in a viewport container for CSS scoping
+                chatContent.innerHTML = `<div id="chat-viewport">${data.html}</div>`;
 
                 if (isAtBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch (e) { }
@@ -286,6 +424,80 @@
                 sendMessage();
             }
         });
+
+        // Click passthrough: intercept clicks on [data-cdp-click] elements
+        chatContent.addEventListener('click', async (e) => {
+            const clickable = e.target.closest('[data-cdp-click]');
+            if (!clickable || !currentCascadeId) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const idx = clickable.getAttribute('data-cdp-click');
+            clickable.classList.add('cdp-clicking');
+
+            try {
+                const res = await fetch(`/click/${currentCascadeId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: parseInt(idx) })
+                });
+                const data = await res.json();
+                if (!res.ok) console.warn('Click failed:', data.error);
+            } catch (err) {
+                console.error('Click passthrough error:', err);
+            } finally {
+                setTimeout(() => clickable.classList.remove('cdp-clicking'), 300);
+            }
+        });
+
+        // New Conversation button
+        document.getElementById('newConvBtn').addEventListener('click', async () => {
+            if (!currentCascadeId) return;
+            try {
+                await fetch(`/new-conversation/${currentCascadeId}`, { method: 'POST' });
+            } catch (err) {
+                console.error('New conversation error:', err);
+            }
+        });
+
+        // Launch Antigravity IDE
+        async function launchAntigravity() {
+            const btn = document.querySelector('.launch-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '⏳ Launching...';
+            }
+            try {
+                const res = await fetch('/api/launch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                if (res.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const data = await res.json();
+                if (data.success) {
+                    if (btn) btn.textContent = '✅ Launched! Waiting for connection...';
+                } else {
+                    if (btn) btn.textContent = '❌ Launch failed';
+                }
+            } catch (err) {
+                console.error('Launch error:', err);
+                if (btn) btn.textContent = '❌ Launch failed';
+            }
+            // Re-enable after delay
+            setTimeout(() => {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🚀 Launch Antigravity';
+                }
+            }, 5000);
+        }
+        // Make it available to onclick
+        window.launchAntigravity = launchAntigravity;
 
         connect();
     </script>

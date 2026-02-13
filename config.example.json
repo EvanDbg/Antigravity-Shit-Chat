@@ -1,0 +1,11 @@
+{
+    "password": "shitchat",
+    "port": 3563,
+    "antigravityPath": "",
+    "cdpPorts": [
+        9000,
+        9001,
+        9002,
+        9003
+    ]
+}

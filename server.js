@@ -5,17 +5,63 @@ import http from 'http';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { spawn } from 'child_process';
+import { createHmac, randomBytes } from 'crypto';
+import { readFileSync, existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PORTS = [9000, 9001, 9002, 9003];
+// Load external config
+let userConfig = {};
+const configPath = join(__dirname, 'config.json');
+if (existsSync(configPath)) {
+    try {
+        userConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
+        console.log('馃搵 Loaded config from config.json');
+    } catch (e) {
+        console.warn('鈿狅笍 Failed to parse config.json, using defaults');
+    }
+}
+
+const PORTS = userConfig.cdpPorts || [9000, 9001, 9002, 9003];
 const DISCOVERY_INTERVAL = 10000;
 const POLL_INTERVAL = 3000;
 
+// Auth config (config.json > env vars > defaults)
+const AUTH_PASSWORD = userConfig.password || process.env.PASSWORD || 'shitchat';
+const AUTH_SECRET = process.env.AUTH_SECRET || randomBytes(32).toString('hex');
+const ANTIGRAVITY_PATH = userConfig.antigravityPath || process.env.ANTIGRAVITY_PATH ||
+    join(process.env.LOCALAPPDATA || 'C:\\Users\\EVAN\\AppData\\Local', 'Programs', 'Antigravity', 'Antigravity.exe');
+
 // Application State
-let cascades = new Map(); // Map<cascadeId, { id, cdp: { ws, contexts, rootContextId }, metadata, snapshot, snapshotHash }>
+let cascades = new Map();
 let wss = null;
+
+// --- Auth Helpers ---
+function makeToken() {
+    const payload = Date.now().toString();
+    const sig = createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+    return payload + '.' + sig;
+}
+
+function verifyToken(token) {
+    if (!token) return false;
+    const [payload, sig] = token.split('.');
+    if (!payload || !sig) return false;
+    const expected = createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+    return sig === expected;
+}
+
+function parseCookies(cookieHeader) {
+    const cookies = {};
+    if (!cookieHeader) return cookies;
+    cookieHeader.split(';').forEach(c => {
+        const [k, ...v] = c.trim().split('=');
+        if (k) cookies[k] = v.join('=');
+    });
+    return cookies;
+}
 
 // --- Helpers ---
 
@@ -93,14 +139,17 @@ async function connectCDP(url) {
 
 async function extractMetadata(cdp) {
     const SCRIPT = `(() => {
+        // Support both legacy #cascade and new iframe-based #chat/#conversation
         const cascade = document.getElementById('cascade');
-        if (!cascade) return { found: false };
+        const chat = document.getElementById('chat');
+        const conversation = document.getElementById('conversation');
+        if (!cascade && !chat && !conversation) return { found: false };
         
         let chatTitle = null;
-        const possibleTitleSelectors = ['h1', 'h2', 'header', '[class*="title"]'];
+        const possibleTitleSelectors = ['h1', 'h2', 'header', '[class*="title"]', '[class*="Title"]'];
         for (const sel of possibleTitleSelectors) {
             const el = document.querySelector(sel);
-            if (el && el.textContent.length > 2 && el.textContent.length < 50) {
+            if (el && el.textContent.length > 2 && el.textContent.length < 80) {
                 chatTitle = el.textContent.trim();
                 break;
             }
@@ -109,7 +158,8 @@ async function extractMetadata(cdp) {
         return {
             found: true,
             chatTitle: chatTitle || 'Agent',
-            isActive: document.hasFocus()
+            isActive: document.hasFocus(),
+            mode: cascade ? 'cascade' : 'iframe'
         };
     })()`;
 
@@ -121,7 +171,7 @@ async function extractMetadata(cdp) {
         } catch (e) { cdp.rootContextId = null; } // reset if stale
     }
 
-    // Search all contexts
+    // Search all contexts (including iframe contexts)
     for (const ctx of cdp.contexts) {
         try {
             const result = await cdp.call("Runtime.evaluate", { expression: SCRIPT, returnByValue: true, contextId: ctx.id });
@@ -135,16 +185,15 @@ async function extractMetadata(cdp) {
 
 async function captureCSS(cdp) {
     const SCRIPT = `(() => {
-        // Gather CSS and namespace it basic way to prevent leaks
+        // Gather CSS and namespace it to prevent leaks
         let css = '';
         for (const sheet of document.styleSheets) {
             try { 
                 for (const rule of sheet.cssRules) {
                     let text = rule.cssText;
-                    // Naive scoping: replace body/html with #cascade locator
-                    // This prevents the monitored app's global backgrounds from overriding our monitor's body
-                    text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#cascade');
-                    text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#cascade');
+                    // Naive scoping: replace body/html with container locator
+                    text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#chat-viewport');
+                    text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#chat-viewport');
                     css += text + '\\n'; 
                 }
             } catch (e) { }
@@ -167,20 +216,66 @@ async function captureCSS(cdp) {
 
 async function captureHTML(cdp) {
     const SCRIPT = `(() => {
-        const cascade = document.getElementById('cascade');
-        if (!cascade) return { error: 'cascade not found' };
+        // Build a unique CSS selector path for a given element
+        function buildSelector(el) {
+            const parts = [];
+            let current = el;
+            while (current && current !== document.body && current !== document.documentElement) {
+                let selector = current.tagName.toLowerCase();
+                if (current.id) {
+                    selector = '#' + CSS.escape(current.id);
+                    parts.unshift(selector);
+                    break; // ID is unique enough
+                }
+                const parent = current.parentElement;
+                if (parent) {
+                    const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+                    if (siblings.length > 1) {
+                        const idx = siblings.indexOf(current) + 1;
+                        selector += ':nth-of-type(' + idx + ')';
+                    }
+                }
+                parts.unshift(selector);
+                current = parent;
+            }
+            return parts.join(' > ');
+        }
+
+        // Support both legacy #cascade and new iframe-based #conversation/#chat
+        const target = document.getElementById('cascade') 
+            || document.getElementById('conversation') 
+            || document.getElementById('chat');
+        if (!target) return { error: 'chat container not found' };
         
-        const clone = cascade.cloneNode(true);
+        // Annotate clickable elements for click passthrough
+        const clickSelector = 'button, a, [role="button"], [class*="cursor-pointer"]';
+        const liveClickables = Array.from(target.querySelectorAll(clickSelector));
+        const selectorMap = {};
+        liveClickables.forEach((el, i) => {
+            selectorMap[i] = buildSelector(el);
+        });
+
+        const clone = target.cloneNode(true);
+        // Tag clone elements with matching indexes
+        const cloneClickables = Array.from(clone.querySelectorAll(clickSelector));
+        cloneClickables.forEach((el, i) => {
+            if (i < liveClickables.length) el.setAttribute('data-cdp-click', i);
+        });
+
         // Remove input box to keep snapshot clean
-        const input = clone.querySelector('[contenteditable="true"]')?.closest('div[id^="cascade"] > div');
-        if (input) input.remove();
+        const editor = clone.querySelector('[contenteditable="true"]');
+        if (editor) {
+            const editorContainer = editor.closest('div[class*="relative"]') || editor.parentElement;
+            if (editorContainer && editorContainer !== clone) editorContainer.remove();
+        }
         
         const bodyStyles = window.getComputedStyle(document.body);
 
         return {
             html: clone.outerHTML,
             bodyBg: bodyStyles.backgroundColor,
-            bodyColor: bodyStyles.color
+            bodyColor: bodyStyles.color,
+            clickMap: selectorMap
         };
     })()`;
 
@@ -234,7 +329,7 @@ async function discover() {
 
         // New connection
         try {
-            console.log(`🔌 Connecting to ${target.title}`);
+            console.log(`馃攲 Connecting to ${target.title}`);
             const cdp = await connectCDP(target.webSocketDebuggerUrl);
             const meta = await extractMetadata(cdp);
 
@@ -253,7 +348,7 @@ async function discover() {
                     snapshotHash: null
                 };
                 newCascades.set(id, cascade);
-                console.log(`✨ Added cascade: ${meta.chatTitle}`);
+                console.log(`鉁?Added cascade: ${meta.chatTitle}`);
             } else {
                 cdp.ws.close();
             }
@@ -265,7 +360,7 @@ async function discover() {
     // 3. Cleanup old
     for (const [id, c] of cascades.entries()) {
         if (!newCascades.has(id)) {
-            console.log(`👋 Removing cascade: ${c.metadata.chatTitle}`);
+            console.log(`馃憢 Removing cascade: ${c.metadata.chatTitle}`);
             try { c.cdp.ws.close(); } catch (e) { }
         }
     }
@@ -287,7 +382,7 @@ async function updateSnapshots() {
                     c.snapshot = snap;
                     c.snapshotHash = hash;
                     broadcast({ type: 'snapshot_update', cascadeId: c.id });
-                    // console.log(`📸 Updated ${c.metadata.chatTitle}`);
+                    // console.log(`馃摳 Updated ${c.metadata.chatTitle}`);
                 }
             }
         } catch (e) { }
@@ -319,7 +414,57 @@ async function main() {
     wss = new WebSocketServer({ server });
 
     app.use(express.json());
+
+    // --- Auth routes (no auth required) ---
+    app.post('/api/login', (req, res) => {
+        if (req.body.password === AUTH_PASSWORD) {
+            const token = makeToken();
+            res.cookie('auth', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' });
+            res.json({ success: true });
+        } else {
+            res.status(401).json({ error: 'Wrong password' });
+        }
+    });
+
+    // Serve login page without auth
+    app.get('/login.html', (req, res) => {
+        res.sendFile(join(__dirname, 'public', 'login.html'));
+    });
+
+    // Auth middleware 鈥?protects everything else
+    app.use((req, res, next) => {
+        const cookies = parseCookies(req.headers.cookie);
+        if (verifyToken(cookies.auth)) return next();
+        // API requests get 401
+        if (req.path.startsWith('/api/') || req.path.startsWith('/cascades') ||
+            req.path.startsWith('/snapshot') || req.path.startsWith('/styles') ||
+            req.path.startsWith('/send') || req.path.startsWith('/click') ||
+            req.path.startsWith('/new-conversation')) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        // Page requests get redirected
+        res.redirect('/login.html');
+    });
+
     app.use(express.static(join(__dirname, 'public')));
+
+    // --- Launch Antigravity ---
+    app.post('/api/launch', (req, res) => {
+        try {
+            const port = req.body.port || 9000;
+            const child = spawn(ANTIGRAVITY_PATH, [`--remote-debugging-port=${port}`], {
+                detached: true,
+                stdio: 'ignore',
+                windowsHide: false
+            });
+            child.unref();
+            console.log(`馃殌 Launched Antigravity (PID: ${child.pid}, CDP port: ${port})`);
+            res.json({ success: true, pid: child.pid, port });
+        } catch (e) {
+            console.error('Launch failed:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
 
     // API Routes
     app.get('/cascades', (req, res) => {
@@ -369,14 +514,79 @@ async function main() {
         else res.status(500).json(result);
     });
 
+    // Click passthrough: forward a click to the IDE via CDP
+    app.post('/click/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
 
-    wss.on('connection', (ws) => {
+        const idx = req.body.index;
+        const selector = c.snapshot?.clickMap?.[idx];
+        if (!selector) return res.status(400).json({ error: 'Invalid click index' });
+
+        try {
+            const result = await c.cdp.call('Runtime.evaluate', {
+                expression: `(() => {
+                    const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
+                    if (!el) return { ok: false, reason: 'element not found' };
+                    el.click();
+                    return { ok: true, text: el.textContent.substring(0, 50) };
+                })()`,
+                returnByValue: true,
+                contextId: c.cdp.rootContextId
+            });
+            const val = result.result?.value;
+            if (val?.ok) {
+                console.log(`馃柋锔?Click forwarded: "${val.text}"`);
+                res.json({ success: true, text: val.text });
+            } else {
+                res.status(500).json({ error: val?.reason || 'click failed' });
+            }
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // New conversation: click the new-conversation button in the cascade panel
+    app.post('/new-conversation/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            const result = await c.cdp.call('Runtime.evaluate', {
+                expression: `(() => {
+                    const btn = document.querySelector('[data-tooltip-id="new-conversation-tooltip"]');
+                    if (btn) { btn.click(); return { ok: true }; }
+                    return { ok: false, reason: 'new-conversation button not found' };
+                })()`,
+                returnByValue: true,
+                contextId: c.cdp.rootContextId
+            });
+            const val = result.result?.value;
+            if (val?.ok) {
+                console.log('馃啎 New conversation created');
+                res.json({ success: true });
+            } else {
+                res.status(500).json({ error: val?.reason || 'failed' });
+            }
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+
+    // WebSocket auth check
+    wss.on('connection', (ws, req) => {
+        const cookies = parseCookies(req.headers.cookie);
+        if (!verifyToken(cookies.auth)) {
+            ws.close(4001, 'Unauthorized');
+            return;
+        }
         broadcastCascadeList(); // Send list on connect
     });
 
-    const PORT = process.env.PORT || 3000;
+    const PORT = userConfig.port || process.env.PORT || 3563;
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`🚀 Server running on port ${PORT}`);
+        console.log(`馃殌 Server running on port ${PORT}`);
     });
 
     // Start Loops
