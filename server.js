@@ -255,6 +255,46 @@ async function captureCSS(cdp) {
     } catch (e) { return ''; }
 }
 
+// --- Quota Extraction ---
+const EXTRACT_QUOTA_SCRIPT = `(() => {
+    const el = document.getElementById('wusimpl.antigravity-quota-watcher');
+    if (!el) return null;
+    const anchor = el.querySelector('a');
+    if (!anchor) return null;
+    const statusText = anchor.textContent?.trim() || '';
+    const ariaLabel = el.getAttribute('aria-label') || anchor.getAttribute('aria-label') || '';
+    if (!ariaLabel) return { statusText, models: [], planName: null };
+    const lines = ariaLabel.split('\\n');
+    const models = [];
+    let planName = null;
+    for (const line of lines) {
+        const planMatch = line.match(/\\(([^)]+)\\)\\s*$/);
+        if (planMatch && !planName) planName = planMatch[1];
+        if (line.startsWith('|') && !line.includes(':---') && !line.includes('模型') && !line.includes('Model')) {
+            const cells = line.split('|').map(c => c.trim()).filter(c => c);
+            if (cells.length >= 2) {
+                const label = cells[0].replace(/^[🟢🟡🔴⚫\\s]+/, '').trim();
+                const remainingStr = cells[1].trim();
+                const resetTime = (cells[2] || '').trim();
+                const pctMatch = remainingStr.match(/([\\d.]+)%/);
+                const percentage = pctMatch ? parseFloat(pctMatch[1]) : null;
+                if (label) models.push({ label, percentage, resetTime });
+            }
+        }
+    }
+    return { statusText, planName, models };
+})()`;
+
+async function extractQuotaInfo(cdp) {
+    try {
+        const result = await cdp.call('Runtime.evaluate', {
+            expression: EXTRACT_QUOTA_SCRIPT,
+            returnByValue: true
+        });
+        return result.result?.value || null;
+    } catch (e) { return null; }
+}
+
 async function captureHTML(cdp) {
     const SCRIPT = `(() => {
         // Build a unique CSS selector path for a given element
@@ -386,7 +426,9 @@ async function discover() {
                     },
                     snapshot: null,
                     css: await captureCSS(cdp), //only on init bc its huge
-                    snapshotHash: null
+                    snapshotHash: null,
+                    quota: null,
+                    quotaHash: null
                 };
                 newCascades.set(id, cascade);
                 console.log(`鉁?Added cascade: ${meta.chatTitle}`);
@@ -423,7 +465,19 @@ async function updateSnapshots() {
                     c.snapshot = snap;
                     c.snapshotHash = hash;
                     broadcast({ type: 'snapshot_update', cascadeId: c.id });
-                    // console.log(`馃摳 Updated ${c.metadata.chatTitle}`);
+                }
+            }
+        } catch (e) { }
+
+        // Quota polling
+        try {
+            const quota = await extractQuotaInfo(c.cdp);
+            if (quota) {
+                const qHash = hashString(JSON.stringify(quota));
+                if (qHash !== c.quotaHash) {
+                    c.quota = quota;
+                    c.quotaHash = qHash;
+                    broadcast({ type: 'quota_update', cascadeId: c.id, quota });
                 }
             }
         } catch (e) { }
@@ -442,7 +496,8 @@ function broadcastCascadeList() {
         id: c.id,
         title: c.metadata.chatTitle,
         window: c.metadata.windowTitle,
-        active: c.metadata.isActive
+        active: c.metadata.isActive,
+        quota: c.quota || null
     }));
     broadcast({ type: 'cascade_list', cascades: list });
 }
@@ -560,6 +615,12 @@ async function main() {
         const c = cascades.get(req.params.id);
         if (!c || !c.snapshot) return res.status(404).json({ error: 'Not found' });
         res.json(c.snapshot);
+    });
+
+    app.get('/api/quota/:id', (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Not found' });
+        res.json(c.quota || { statusText: '', planName: null, models: [] });
     });
 
     app.get('/styles/:id', (req, res) => {

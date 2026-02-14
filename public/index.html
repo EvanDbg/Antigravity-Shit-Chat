@@ -243,6 +243,148 @@
                 opacity: 0.4;
             }
         }
+
+        /* Quota Bar */
+        .quota-bar {
+            background: #222;
+            border-bottom: 1px solid #333;
+            padding: 6px 12px;
+            display: none;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s;
+        }
+
+        .quota-bar.visible {
+            display: block;
+        }
+
+        .quota-summary {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+            color: #aaa;
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        .quota-summary .plan-badge {
+            background: #333;
+            color: #8b5cf6;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
+        .quota-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .quota-chip .q-label {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .quota-chip .q-bar {
+            width: 48px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .quota-chip .q-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+
+        .quota-chip .q-pct {
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 32px;
+            text-align: right;
+        }
+
+        .quota-expand-icon {
+            margin-left: auto;
+            font-size: 10px;
+            color: #555;
+            flex-shrink: 0;
+            transition: transform 0.2s;
+        }
+
+        .quota-bar.expanded .quota-expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .quota-details {
+            display: none;
+            padding: 8px 0 4px;
+        }
+
+        .quota-bar.expanded .quota-details {
+            display: block;
+        }
+
+        .quota-detail-row {
+            display: flex;
+            align-items: center;
+            padding: 4px 0;
+            font-size: 12px;
+            gap: 8px;
+        }
+
+        .quota-detail-row .qd-emoji {
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .quota-detail-row .qd-label {
+            color: #ccc;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .quota-detail-row .qd-bar {
+            width: 80px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .quota-detail-row .qd-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+        }
+
+        .quota-detail-row .qd-pct {
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .quota-detail-row .qd-reset {
+            color: #666;
+            font-size: 11px;
+            min-width: 80px;
+            text-align: right;
+            flex-shrink: 0;
+        }
     </style>
     <style id="cascade-style">
         /* Dynamic styles will be injected here */
@@ -256,6 +398,11 @@
             <div class="cascade-tab">Loading...</div>
         </div>
         <div class="new-conv-btn" id="newConvBtn" title="New Conversation">＋</div>
+    </div>
+
+    <div class="quota-bar" id="quotaBar" onclick="toggleQuotaExpand()">
+        <div class="quota-summary" id="quotaSummary"></div>
+        <div class="quota-details" id="quotaDetails"></div>
     </div>
 
     <div class="chat-container" id="chatContainer">
@@ -277,6 +424,90 @@
         let cascades = [];
         let currentCascadeId = null;
         let ws = null;
+        let quotaCache = {}; // { cascadeId: quotaData }
+
+        function getQuotaColor(pct) {
+            if (pct === null || pct === undefined) return '#555';
+            if (pct >= 50) return '#4ade80';
+            if (pct >= 30) return '#facc15';
+            if (pct > 0) return '#f87171';
+            return '#555';
+        }
+
+        function getQuotaEmoji(pct) {
+            if (pct === null || pct === undefined) return '⚫';
+            if (pct >= 50) return '🟢';
+            if (pct >= 30) return '🟡';
+            if (pct > 0) return '🔴';
+            return '⚫';
+        }
+
+        function shortenLabel(label) {
+            return label
+                .replace('(Thinking)', '(T)')
+                .replace('(Medium)', '(M)')
+                .replace('(High)', '(H)')
+                .replace('(Low)', '(L)');
+        }
+
+        function renderQuotaBar(cascadeId) {
+            const bar = document.getElementById('quotaBar');
+            const summary = document.getElementById('quotaSummary');
+            const details = document.getElementById('quotaDetails');
+            const quota = quotaCache[cascadeId];
+
+            if (!quota || !quota.models || quota.models.length === 0) {
+                bar.classList.remove('visible');
+                return;
+            }
+
+            bar.classList.add('visible');
+
+            // Summary: plan badge + top model chips + expand icon
+            let html = '';
+            if (quota.planName) {
+                html += `<span class="plan-badge">${quota.planName}</span>`;
+            }
+
+            // Show up to 4 models in summary
+            const show = quota.models.slice(0, 4);
+            for (const m of show) {
+                const color = getQuotaColor(m.percentage);
+                const pct = m.percentage !== null ? m.percentage.toFixed(0) + '%' : '?';
+                const w = m.percentage !== null ? m.percentage : 0;
+                html += `<span class="quota-chip">`;
+                html += `<span class="q-label">${shortenLabel(m.label)}</span>`;
+                html += `<span class="q-bar"><span class="q-fill" style="width:${w}%;background:${color}"></span></span>`;
+                html += `<span class="q-pct" style="color:${color}">${pct}</span>`;
+                html += `</span>`;
+            }
+            if (quota.models.length > 4) {
+                html += `<span style="color:#666;font-size:11px">+${quota.models.length - 4} more</span>`;
+            }
+            html += `<span class="quota-expand-icon">▼</span>`;
+            summary.innerHTML = html;
+
+            // Details: full list with reset times
+            let dhtml = '';
+            for (const m of quota.models) {
+                const color = getQuotaColor(m.percentage);
+                const emoji = getQuotaEmoji(m.percentage);
+                const pct = m.percentage !== null ? m.percentage.toFixed(1) + '%' : 'N/A';
+                const w = m.percentage !== null ? m.percentage : 0;
+                dhtml += `<div class="quota-detail-row">`;
+                dhtml += `<span class="qd-emoji">${emoji}</span>`;
+                dhtml += `<span class="qd-label">${m.label}</span>`;
+                dhtml += `<span class="qd-bar"><span class="qd-fill" style="width:${w}%;background:${color}"></span></span>`;
+                dhtml += `<span class="qd-pct" style="color:${color}">${pct}</span>`;
+                dhtml += `<span class="qd-reset">⏱ ${m.resetTime || ''}</span>`;
+                dhtml += `</div>`;
+            }
+            details.innerHTML = dhtml;
+        }
+
+        function toggleQuotaExpand() {
+            document.getElementById('quotaBar').classList.toggle('expanded');
+        }
 
         function connect() {
             ws = new WebSocket(`ws://${location.host}`);
@@ -286,17 +517,30 @@
 
                 if (data.type === 'cascade_list') {
                     cascades = data.cascades;
+                    // Cache quota from cascade_list
+                    for (const c of cascades) {
+                        if (c.quota) quotaCache[c.id] = c.quota;
+                    }
                     renderTabs();
 
                     // Auto-select first if none selected
                     if (!currentCascadeId && cascades.length > 0) {
                         selectCascade(cascades[0].id);
                     }
+                    // Update quota bar for current cascade
+                    if (currentCascadeId) renderQuotaBar(currentCascadeId);
                 }
 
                 if (data.type === 'snapshot_update') {
                     if (data.cascadeId === currentCascadeId) {
                         updateContentOnly(currentCascadeId);
+                    }
+                }
+
+                if (data.type === 'quota_update') {
+                    quotaCache[data.cascadeId] = data.quota;
+                    if (data.cascadeId === currentCascadeId) {
+                        renderQuotaBar(currentCascadeId);
                     }
                 }
             };
@@ -333,6 +577,7 @@
             currentCascadeId = id;
             renderTabs();
             loadCascade(id);
+            renderQuotaBar(id);
         }
 
         async function loadCascade(id) {
@@ -516,11 +761,11 @@
                     } else {
                         if (btn) btn.textContent = '❌ Launch failed';
                     }
-                    setTimeout(() => { 
-                         if (btn) {
-                            btn.disabled = false; 
-                            btn.textContent = '🚀 Launch Antigravity'; 
-                         }
+                    setTimeout(() => {
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.textContent = '🚀 Launch Antigravity';
+                        }
                     }, 3000);
                 }
             } catch (err) {
