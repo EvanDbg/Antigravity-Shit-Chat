@@ -31,3 +31,6 @@ config.json
 explore_*.json
 cdp_*.json
 diagnose.mjs
+
+# Push notification subscriptions
+.push-subscriptions.json

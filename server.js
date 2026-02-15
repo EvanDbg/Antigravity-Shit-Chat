@@ -8,7 +8,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { spawn, exec } from 'child_process';
 import { createHmac, randomBytes } from 'crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import webpush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -48,9 +49,40 @@ function getDefaultAntigravityPath() {
 
 const ANTIGRAVITY_PATH = userConfig.antigravityPath || process.env.ANTIGRAVITY_PATH || getDefaultAntigravityPath();
 
+// Antigravity-Manager config
+const MANAGER_URL = userConfig.managerUrl || process.env.MANAGER_URL || 'http://127.0.0.1:8045';
+const MANAGER_PASSWORD = userConfig.managerPassword || process.env.MANAGER_PASSWORD || '';
+
 // Application State
 let cascades = new Map();
 let wss = null;
+
+// --- Web Push Setup ---
+let vapidKeys = userConfig.vapidKeys;
+if (!vapidKeys) {
+    vapidKeys = webpush.generateVAPIDKeys();
+    userConfig.vapidKeys = vapidKeys;
+    try {
+        writeFileSync(configPath, JSON.stringify(userConfig, null, 4));
+        console.log('🔑 Generated new VAPID keys and saved to config.json');
+    } catch (e) {
+        console.warn('⚠️ Could not save VAPID keys to config.json');
+    }
+}
+// VAPID subject: Apple requires a valid mailto: or https: URL (not .local)
+const vapidSubject = userConfig.vapidSubject || process.env.VAPID_SUBJECT || 'mailto:noreply@example.com';
+webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+console.log(`🔐 VAPID subject: ${vapidSubject}`);
+
+// Push subscriptions (persisted to file)
+const SUBS_PATH = join(__dirname, '.push-subscriptions.json');
+let pushSubscriptions = [];
+if (existsSync(SUBS_PATH)) {
+    try { pushSubscriptions = JSON.parse(readFileSync(SUBS_PATH, 'utf-8')); } catch (e) { }
+}
+function saveSubs() {
+    try { writeFileSync(SUBS_PATH, JSON.stringify(pushSubscriptions)); } catch (e) { }
+}
 
 // --- Auth Helpers ---
 function makeToken() {
@@ -428,7 +460,9 @@ async function discover() {
                     css: await captureCSS(cdp), //only on init bc its huge
                     snapshotHash: null,
                     quota: null,
-                    quotaHash: null
+                    quotaHash: null,
+                    stableCount: 0,
+                    notified: false
                 };
                 newCascades.set(id, cascade);
                 console.log(`鉁?Added cascade: ${meta.chatTitle}`);
@@ -462,12 +496,38 @@ async function updateSnapshots() {
             if (snap) {
                 const hash = hashString(snap.html);
                 if (hash !== c.snapshotHash) {
+                    const oldLen = c.contentLength || 0;
+                    const newLen = snap.html.length;
+                    const lenDiff = Math.abs(newLen - oldLen);
+
                     c.snapshot = snap;
                     c.snapshotHash = hash;
+                    c.contentLength = newLen;
+                    c.stableCount = 0;
+
+                    // Only reset notified if content changed significantly (>50 chars)
+                    // This filters out trivial changes like timestamps updating
+                    if (lenDiff > 50) {
+                        c.notified = false;
+                    }
+
                     broadcast({ type: 'snapshot_update', cascadeId: c.id });
+                } else {
+                    c.stableCount = (c.stableCount || 0) + 1;
                 }
             }
         } catch (e) { }
+
+        // AI completion detection: stable for ~9s (3 polls * 3s) after significant changes
+        // With 2-minute cooldown to prevent notification spam
+        const NOTIFY_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
+        const now = Date.now();
+        const lastNotif = c.lastNotifiedAt || 0;
+        if (c.stableCount === 3 && !c.notified && c.snapshot && (now - lastNotif > NOTIFY_COOLDOWN_MS)) {
+            c.notified = true;
+            c.lastNotifiedAt = now;
+            sendPushNotification(c);
+        }
 
         // Quota polling
         try {
@@ -506,6 +566,7 @@ function broadcastCascadeList() {
 
 async function main() {
     const app = express();
+    app.set('trust proxy', true);
     const server = http.createServer(app);
     wss = new WebSocketServer({ server });
 
@@ -515,7 +576,8 @@ async function main() {
     app.post('/api/login', (req, res) => {
         if (req.body.password === AUTH_PASSWORD) {
             const token = makeToken();
-            res.cookie('auth', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' });
+            const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+            res.cookie('auth', token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax', secure: isSecure });
             res.json({ success: true });
         } else {
             res.status(401).json({ error: 'Wrong password' });
@@ -602,6 +664,102 @@ async function main() {
         }
     });
 
+    // --- Kill All Antigravity ---
+    app.post('/api/kill-all', async (req, res) => {
+        try {
+            console.log('🛑 Kill-all requested: closing all Antigravity instances...');
+
+            // 1. Close all CDP WebSocket connections
+            let closedCount = 0;
+            for (const [id, c] of cascades.entries()) {
+                try {
+                    c.cdp.ws.close();
+                    closedCount++;
+                } catch (e) { }
+            }
+            cascades.clear();
+            broadcastCascadeList(); // Notify frontend immediately
+
+            // 2. Kill OS processes
+            const killCmd = process.platform === 'darwin'
+                ? 'pkill -f "Antigravity.app/Contents/MacOS/Antigravity" || true'
+                : 'taskkill /IM Antigravity.exe /F 2>nul || echo done';
+
+            await new Promise((resolve) => {
+                exec(killCmd, (err, stdout, stderr) => {
+                    if (err) console.warn('Kill command warning:', err.message);
+                    resolve();
+                });
+            });
+
+            // 3. Wait a moment and verify
+            await new Promise(r => setTimeout(r, 1000));
+            const stillRunning = await checkProcessRunning('Antigravity');
+
+            console.log(`🛑 Kill-all complete: ${closedCount} CDP connections closed, process ${stillRunning ? 'still running' : 'stopped'}`);
+            res.json({
+                success: !stillRunning,
+                closedConnections: closedCount,
+                processKilled: !stillRunning
+            });
+        } catch (e) {
+            console.error('Kill-all failed:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // --- Antigravity-Manager Proxy ---
+    const managerHeaders = () => ({
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${MANAGER_PASSWORD}`,
+        'x-api-key': MANAGER_PASSWORD
+    });
+
+    app.get('/api/manager/accounts', async (req, res) => {
+        if (!MANAGER_PASSWORD) return res.status(501).json({ error: 'Manager not configured' });
+        try {
+            const resp = await fetch(`${MANAGER_URL}/api/accounts`, { headers: managerHeaders() });
+            if (!resp.ok) return res.status(resp.status).json({ error: `Manager returned ${resp.status}` });
+            res.json(await resp.json());
+        } catch (e) {
+            console.error('Manager accounts error:', e.message);
+            res.status(502).json({ error: 'Cannot reach Antigravity-Manager' });
+        }
+    });
+
+    app.get('/api/manager/current', async (req, res) => {
+        if (!MANAGER_PASSWORD) return res.status(501).json({ error: 'Manager not configured' });
+        try {
+            const resp = await fetch(`${MANAGER_URL}/api/accounts/current`, { headers: managerHeaders() });
+            if (!resp.ok) return res.status(resp.status).json({ error: `Manager returned ${resp.status}` });
+            res.json(await resp.json());
+        } catch (e) {
+            res.status(502).json({ error: 'Cannot reach Antigravity-Manager' });
+        }
+    });
+
+    app.post('/api/manager/switch', async (req, res) => {
+        if (!MANAGER_PASSWORD) return res.status(501).json({ error: 'Manager not configured' });
+        const { accountId } = req.body;
+        if (!accountId) return res.status(400).json({ error: 'accountId required' });
+        try {
+            const resp = await fetch(`${MANAGER_URL}/api/accounts/switch`, {
+                method: 'POST',
+                headers: managerHeaders(),
+                body: JSON.stringify({ accountId })
+            });
+            if (!resp.ok) return res.status(resp.status).json({ error: `Manager returned ${resp.status}` });
+            // Verify switch
+            const currentResp = await fetch(`${MANAGER_URL}/api/accounts/current`, { headers: managerHeaders() });
+            const current = await currentResp.json();
+            console.log(`🔄 Account switched to: ${current.email}`);
+            res.json({ success: true, current });
+        } catch (e) {
+            console.error('Manager switch error:', e.message);
+            res.status(502).json({ error: 'Cannot reach Antigravity-Manager' });
+        }
+    });
+
     // API Routes
     app.get('/cascades', (req, res) => {
         res.json(Array.from(cascades.values()).map(c => ({
@@ -621,6 +779,30 @@ async function main() {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Not found' });
         res.json(c.quota || { statusText: '', planName: null, models: [] });
+    });
+
+    // --- Push Notification Routes ---
+    app.get('/api/push/vapid-key', (req, res) => {
+        res.json({ publicKey: vapidKeys.publicKey });
+    });
+
+    app.post('/api/push/subscribe', (req, res) => {
+        const sub = req.body;
+        if (!sub?.endpoint) return res.status(400).json({ error: 'Invalid subscription' });
+        if (!pushSubscriptions.find(s => s.endpoint === sub.endpoint)) {
+            pushSubscriptions.push(sub);
+            saveSubs();
+            console.log(`🔔 Push subscription added (total: ${pushSubscriptions.length})`);
+        }
+        res.json({ success: true });
+    });
+
+    app.post('/api/push/unsubscribe', (req, res) => {
+        const { endpoint } = req.body;
+        pushSubscriptions = pushSubscriptions.filter(s => s.endpoint !== endpoint);
+        saveSubs();
+        console.log(`🔕 Push subscription removed (total: ${pushSubscriptions.length})`);
+        res.json({ success: true });
     });
 
     app.get('/styles/:id', (req, res) => {
@@ -779,6 +961,46 @@ async function injectMessage(cdp, text) {
         });
         return res.result?.value || { ok: false };
     } catch (e) { return { ok: false, reason: e.message }; }
+}
+
+// Push notification sender
+async function sendPushNotification(cascade) {
+    if (pushSubscriptions.length === 0) return;
+
+    const payload = JSON.stringify({
+        title: `💬 ${cascade.metadata.chatTitle}`,
+        body: 'AI has finished responding',
+        cascadeId: cascade.id
+    });
+
+    console.log(`📤 Sending push to ${pushSubscriptions.length} subscriber(s) for "${cascade.metadata.chatTitle}"`);
+
+    const results = await Promise.allSettled(
+        pushSubscriptions.map(sub => webpush.sendNotification(sub, payload))
+    );
+
+    // Log each result for debugging
+    const failed = [];
+    results.forEach((r, i) => {
+        const endpoint = pushSubscriptions[i]?.endpoint || 'unknown';
+        const shortEndpoint = endpoint.substring(0, 60) + '...';
+        if (r.status === 'fulfilled') {
+            console.log(`  ✅ [${i}] ${shortEndpoint} → HTTP ${r.value?.statusCode || 'OK'}`);
+        } else {
+            const code = r.reason?.statusCode || 'N/A';
+            const body = r.reason?.body || r.reason?.message || 'unknown error';
+            console.error(`  ❌ [${i}] ${shortEndpoint} → HTTP ${code}: ${body}`);
+            if (code === 410 || code === 404) {
+                failed.push(endpoint);
+            }
+        }
+    });
+
+    if (failed.length) {
+        pushSubscriptions = pushSubscriptions.filter(s => !failed.includes(s.endpoint));
+        saveSubs();
+        console.log(`🧹 Cleaned up ${failed.length} expired push subscription(s)`);
+    }
 }
 
 main();

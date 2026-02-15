@@ -2,10 +2,13 @@
     "password": "shitchat",
     "port": 3563,
     "antigravityPath": "",
+    "managerUrl": "http://127.0.0.1:8045",
+    "managerPassword": "",
     "cdpPorts": [
         9000,
         9001,
         9002,
         9003
-    ]
+    ],
+    "vapidKeys": null
 }

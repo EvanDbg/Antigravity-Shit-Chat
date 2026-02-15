@@ -6,6 +6,11 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Antigravity Shit-Chat</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#3b82f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <style>
         * {
             margin: 0;
@@ -25,6 +30,8 @@
             flex-direction: column;
             overflow: hidden;
             margin: 0 !important;
+            /* Prevent extra whitespace in PWA standalone mode */
+            padding: 0 !important;
         }
 
         /* Cascade Selector / Header */
@@ -37,6 +44,8 @@
             overflow-x: auto;
             white-space: nowrap;
             -webkit-overflow-scrolling: touch;
+            /* iOS PWA: push below status bar / notch */
+            padding-top: env(safe-area-inset-top);
         }
 
         .cascade-tab {
@@ -138,7 +147,9 @@
             pointer-events: none;
         }
 
-        .new-conv-btn {
+        .new-conv-btn,
+        .notif-btn,
+        .kill-btn {
             padding: 0 12px;
             background: transparent;
             border: 1px solid #3a3a3a;
@@ -150,10 +161,22 @@
             transition: all 0.2s;
         }
 
-        .new-conv-btn:hover {
+        .new-conv-btn:hover,
+        .notif-btn:hover {
             background: #333;
             color: #fff;
             border-color: #3b82f6;
+        }
+
+        .kill-btn:hover {
+            background: #3a1a1a;
+            color: #f87171;
+            border-color: #f87171;
+        }
+
+        .notif-btn.active {
+            color: #facc15;
+            border-color: #facc15;
         }
 
         /* Offline / Empty state */
@@ -385,6 +408,217 @@
             text-align: right;
             flex-shrink: 0;
         }
+
+        /* Account Manager Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-box {
+            background: #1e1e1e;
+            border: 1px solid #3a3a3a;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 520px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 16px;
+            color: #e0e0e0;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 22px;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
+        .modal-close:hover {
+            color: #fff;
+        }
+
+        .modal-body {
+            overflow-y: auto;
+            padding: 12px 16px;
+            flex: 1;
+        }
+
+        .acct-card {
+            background: #252525;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: border-color 0.2s;
+        }
+
+        .acct-card.current {
+            border-color: #3b82f6;
+            background: #1a2540;
+        }
+
+        .acct-card.disabled {
+            opacity: 0.5;
+        }
+
+        .acct-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .acct-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .acct-email {
+            font-size: 13px;
+            color: #e0e0e0;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .acct-meta {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        .acct-badge {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        .acct-badge.active {
+            background: #1d4ed8;
+            color: #93c5fd;
+        }
+
+        .acct-badge.forbidden {
+            background: #7f1d1d;
+            color: #fca5a5;
+        }
+
+        .acct-quotas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .acct-q {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #aaa;
+        }
+
+        .acct-q-bar {
+            width: 40px;
+            height: 5px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .acct-q-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        .acct-switch-btn {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        .acct-switch-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .acct-switch-btn:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        .acct-btn {
+            padding: 0 12px;
+            background: transparent;
+            border: 1px solid #3a3a3a;
+            color: #999;
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        .acct-btn:hover {
+            background: #333;
+            color: #60a5fa;
+            border-color: #3b82f6;
+        }
+
+        .modal-error {
+            color: #f87171;
+            text-align: center;
+            padding: 20px;
+            font-size: 13px;
+        }
+
+        .modal-loading {
+            color: #888;
+            text-align: center;
+            padding: 30px;
+            font-size: 13px;
+        }
     </style>
     <style id="cascade-style">
         /* Dynamic styles will be injected here */
@@ -398,6 +632,9 @@
             <div class="cascade-tab">Loading...</div>
         </div>
         <div class="new-conv-btn" id="newConvBtn" title="New Conversation">＋</div>
+        <div class="notif-btn" id="notifBtn" title="Toggle notifications" onclick="toggleNotifications()">🔕</div>
+        <div class="kill-btn" id="killBtn" title="Kill all Antigravity" onclick="killAllAntigravity()">⏻</div>
+        <div class="acct-btn" id="acctBtn" title="Account Manager" onclick="openAccountModal()">👤</div>
     </div>
 
     <div class="quota-bar" id="quotaBar" onclick="toggleQuotaExpand()">
@@ -414,6 +651,19 @@
     <div class="input-section">
         <textarea id="messageInput" placeholder="Type a message..."></textarea>
         <button id="sendBtn">Send</button>
+    </div>
+
+    <!-- Account Manager Modal -->
+    <div class="modal-overlay" id="acctModal" onclick="if(event.target===this)closeAccountModal()">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h2>🔄 Account Manager</h2>
+                <button class="modal-close" onclick="closeAccountModal()">✕</button>
+            </div>
+            <div class="modal-body" id="acctModalBody">
+                <div class="modal-loading">Loading accounts...</div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -510,7 +760,8 @@
         }
 
         function connect() {
-            ws = new WebSocket(`ws://${location.host}`);
+            const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${wsProtocol}//${location.host}`);
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -778,6 +1029,249 @@
         }
         // Make it available to onclick
         window.launchAntigravity = launchAntigravity;
+
+        // --- Service Worker & Push Notifications ---
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then(() => {
+                checkNotifStatus();
+            });
+        }
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const raw = atob(base64);
+            return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+        }
+
+        async function toggleNotifications() {
+            const btn = document.getElementById('notifBtn');
+            if (!('serviceWorker' in navigator)) {
+                const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+                const proto = location.protocol;
+                alert(`Service Worker not available.\n\nProtocol: ${proto}\nStandalone: ${isStandalone}\nSecure: ${location.protocol === 'https:'}\n\nService Workers require HTTPS. If using HTTP, push notifications cannot work.`);
+                return;
+            }
+
+            // Wait for SW to be ready before checking PushManager
+            let reg;
+            try {
+                reg = await navigator.serviceWorker.ready;
+            } catch (e) {
+                alert('Service Worker failed to activate: ' + e.message);
+                return;
+            }
+
+            if (!reg.pushManager) {
+                alert('Push notifications are not supported. Make sure you opened this from the Home Screen PWA (not Safari).');
+                return;
+            }
+
+            if (Notification.permission === 'default') {
+                const perm = await Notification.requestPermission();
+                if (perm !== 'granted') return;
+            }
+            if (Notification.permission !== 'granted') {
+                alert('Notification permission denied. Please enable it in browser settings.');
+                return;
+            }
+
+            const existing = await reg.pushManager.getSubscription();
+
+            if (existing) {
+                await existing.unsubscribe();
+                await fetch('/api/push/unsubscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ endpoint: existing.endpoint })
+                });
+                btn.textContent = '🔕';
+                btn.classList.remove('active');
+            } else {
+                try {
+                    const res = await fetch('/api/push/vapid-key');
+                    const { publicKey } = await res.json();
+                    const sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(publicKey)
+                    });
+                    await fetch('/api/push/subscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(sub.toJSON())
+                    });
+                    btn.textContent = '🔔';
+                    btn.classList.add('active');
+                } catch (err) {
+                    console.error('Push subscribe failed:', err);
+                    alert('Failed to subscribe: ' + err.message);
+                }
+            }
+        }
+        window.toggleNotifications = toggleNotifications;
+
+        async function checkNotifStatus() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.getSubscription();
+                const btn = document.getElementById('notifBtn');
+                if (sub) {
+                    btn.textContent = '🔔';
+                    btn.classList.add('active');
+                } else {
+                    btn.textContent = '🔕';
+                    btn.classList.remove('active');
+                }
+            } catch (e) { }
+        }
+
+        // --- Kill All Antigravity ---
+        async function killAllAntigravity() {
+            if (!confirm('确定要关闭所有 Antigravity 程序吗？\n\nThis will kill all running Antigravity IDE instances.')) return;
+
+            const btn = document.getElementById('killBtn');
+            btn.textContent = '⏳';
+            btn.style.pointerEvents = 'none';
+
+            try {
+                const res = await fetch('/api/kill-all', { method: 'POST' });
+                if (res.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const data = await res.json();
+                if (data.success) {
+                    btn.textContent = '✅';
+                    console.log(`Kill-all: ${data.closedConnections} connections closed`);
+                } else {
+                    btn.textContent = '⚠️';
+                    console.warn('Kill-all: process may still be running');
+                }
+            } catch (err) {
+                console.error('Kill-all error:', err);
+                btn.textContent = '❌';
+            }
+
+            setTimeout(() => {
+                btn.textContent = '⏻';
+                btn.style.pointerEvents = '';
+            }, 2000);
+        }
+        window.killAllAntigravity = killAllAntigravity;
+
+        // --- Account Manager Modal ---
+        async function openAccountModal() {
+            const modal = document.getElementById('acctModal');
+            const body = document.getElementById('acctModalBody');
+            modal.classList.add('active');
+            body.innerHTML = '<div class="modal-loading">Loading accounts...</div>';
+
+            try {
+                const res = await fetch('/api/manager/accounts');
+                if (res.status === 401) { window.location.href = '/login.html'; return; }
+                if (res.status === 501) {
+                    body.innerHTML = '<div class="modal-error">Manager not configured.<br>Set managerUrl and managerPassword in config.json</div>';
+                    return;
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                renderAccounts(data.accounts, data.current_account_id);
+            } catch (e) {
+                body.innerHTML = `<div class="modal-error">Cannot reach Antigravity-Manager<br><small>${e.message}</small></div>`;
+            }
+        }
+        window.openAccountModal = openAccountModal;
+
+        function closeAccountModal() {
+            document.getElementById('acctModal').classList.remove('active');
+        }
+        window.closeAccountModal = closeAccountModal;
+
+        function getQuotaColor(pct) {
+            if (pct > 50) return '#22c55e';
+            if (pct > 20) return '#eab308';
+            return '#ef4444';
+        }
+
+        function renderAccounts(accounts, currentId) {
+            const body = document.getElementById('acctModalBody');
+            if (!accounts || accounts.length === 0) {
+                body.innerHTML = '<div class="modal-error">No accounts found</div>';
+                return;
+            }
+
+            // Sort: current first, then by name
+            accounts.sort((a, b) => {
+                if (a.id === currentId) return -1;
+                if (b.id === currentId) return 1;
+                return (a.email || '').localeCompare(b.email || '');
+            });
+
+            body.innerHTML = accounts.map(acct => {
+                const isCurrent = acct.id === currentId;
+                const isForbidden = acct.quota?.is_forbidden;
+                const tier = acct.quota?.subscription_tier || '';
+                const models = acct.quota?.models || [];
+
+                // Group quotas: show key models
+                const quotaHtml = models.slice(0, 6).map(m => {
+                    const shortName = m.name.replace('gemini-', 'G-').replace('claude-', 'C-')
+                        .replace('-thinking', '-T').replace('-image', '-I');
+                    return `<div class="acct-q">
+                        <div class="acct-q-bar"><div class="acct-q-fill" style="width:${m.percentage}%;background:${getQuotaColor(m.percentage)}"></div></div>
+                        <span>${shortName} ${m.percentage}%</span>
+                    </div>`;
+                }).join('');
+
+                const badgeHtml = isCurrent
+                    ? '<span class="acct-badge active">ACTIVE</span>'
+                    : isForbidden
+                        ? '<span class="acct-badge forbidden">BANNED</span>'
+                        : '';
+
+                const btnHtml = isCurrent
+                    ? '<button class="acct-switch-btn" disabled>Current Account</button>'
+                    : `<button class="acct-switch-btn" onclick="switchAccount('${acct.id}', this)">Switch to this account</button>`;
+
+                return `<div class="acct-card ${isCurrent ? 'current' : ''} ${acct.disabled ? 'disabled' : ''}">
+                    <div class="acct-top">
+                        <div class="acct-info">
+                            <div class="acct-email">${acct.email || acct.name}</div>
+                            <div class="acct-meta">${acct.name}${tier ? ' · ' + tier : ''}</div>
+                        </div>
+                        ${badgeHtml}
+                    </div>
+                    ${quotaHtml ? '<div class="acct-quotas">' + quotaHtml + '</div>' : ''}
+                    ${btnHtml}
+                </div>`;
+            }).join('');
+        }
+
+        async function switchAccount(accountId, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Switching...';
+            try {
+                const res = await fetch('/api/manager/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ accountId })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (data.success) {
+                    btn.textContent = '✅ Switched!';
+                    setTimeout(() => openAccountModal(), 800);
+                } else {
+                    throw new Error('Switch failed');
+                }
+            } catch (e) {
+                btn.textContent = '❌ Failed';
+                btn.disabled = false;
+                setTimeout(() => { btn.textContent = 'Switch to this account'; }, 2000);
+            }
+        }
+        window.switchAccount = switchAccount;
 
         connect();
     </script>
