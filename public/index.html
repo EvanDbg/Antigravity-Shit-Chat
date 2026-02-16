@@ -302,6 +302,12 @@
             flex-shrink: 0;
         }
 
+        .quota-status-text {
+            font-size: 13px;
+            color: #ccc;
+            letter-spacing: 0.3px;
+        }
+
         .quota-chip {
             display: inline-flex;
             align-items: center;
@@ -713,26 +719,16 @@
 
             bar.classList.add('visible');
 
-            // Summary: plan badge + top model chips + expand icon
+            // Summary: mirror the Antigravity app's status bar text exactly
             let html = '';
-            if (quota.planName) {
-                html += `<span class="plan-badge">${quota.planName}</span>`;
-            }
-
-            // Show up to 4 models in summary
-            const show = quota.models.slice(0, 4);
-            for (const m of show) {
-                const color = getQuotaColor(m.percentage);
-                const pct = m.percentage !== null ? m.percentage.toFixed(0) + '%' : '?';
-                const w = m.percentage !== null ? m.percentage : 0;
-                html += `<span class="quota-chip">`;
-                html += `<span class="q-label">${shortenLabel(m.label)}</span>`;
-                html += `<span class="q-bar"><span class="q-fill" style="width:${w}%;background:${color}"></span></span>`;
-                html += `<span class="q-pct" style="color:${color}">${pct}</span>`;
-                html += `</span>`;
-            }
-            if (quota.models.length > 4) {
-                html += `<span style="color:#666;font-size:11px">+${quota.models.length - 4} more</span>`;
+            if (quota.statusText) {
+                html += `<span class="quota-status-text">${quota.statusText}</span>`;
+            } else {
+                // Fallback if statusText not available
+                const topModel = quota.models[0];
+                const emoji = getQuotaEmoji(topModel?.percentage);
+                const pct = topModel?.percentage !== null ? topModel.percentage.toFixed(0) + '%' : '?';
+                html += `<span class="quota-status-text">${emoji} ${shortenLabel(topModel?.label || 'Quota')}: ${pct}</span>`;
             }
             html += `<span class="quota-expand-icon">▼</span>`;
             summary.innerHTML = html;
