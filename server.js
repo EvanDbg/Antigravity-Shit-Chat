@@ -257,19 +257,32 @@ async function extractMetadata(cdp) {
 }
 
 async function captureCSS(cdp) {
-    const SCRIPT = `(() => {
+    const SCRIPT = `(async () => {
         // Gather CSS and namespace it to prevent leaks
         let css = '';
         for (const sheet of document.styleSheets) {
-            try { 
+            try {
+                // Try direct access first (same-origin)
                 for (const rule of sheet.cssRules) {
                     let text = rule.cssText;
-                    // Naive scoping: replace body/html with container locator
                     text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#chat-viewport');
                     text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#chat-viewport');
-                    css += text + '\\n'; 
+                    css += text + '\\n';
                 }
-            } catch (e) { }
+            } catch (e) {
+                // Cross-origin sheet — fetch it manually
+                if (sheet.href) {
+                    try {
+                        const resp = await fetch(sheet.href);
+                        if (resp.ok) {
+                            let text = await resp.text();
+                            text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#chat-viewport');
+                            text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#chat-viewport');
+                            css += text + '\\n';
+                        }
+                    } catch (fetchErr) { /* skip if fetch fails too */ }
+                }
+            }
         }
         return { css };
     })()`;
@@ -281,7 +294,8 @@ async function captureCSS(cdp) {
         const result = await cdp.call("Runtime.evaluate", {
             expression: SCRIPT,
             returnByValue: true,
-            contextId: contextId
+            contextId: contextId,
+            awaitPromise: true
         });
         return result.result?.value?.css || '';
     } catch (e) { return ''; }
@@ -457,7 +471,9 @@ async function discover() {
                         isActive: meta.isActive
                     },
                     snapshot: null,
-                    css: await captureCSS(cdp), //only on init bc its huge
+                    css: await captureCSS(cdp),
+                    cssHash: null,
+                    cssRefreshCounter: 0,
                     snapshotHash: null,
                     quota: null,
                     quotaHash: null,
@@ -541,6 +557,19 @@ async function updateSnapshots() {
                 }
             }
         } catch (e) { }
+
+        // Periodic CSS refresh: every 10 polls (~30s)
+        c.cssRefreshCounter = (c.cssRefreshCounter || 0) + 1;
+        if (c.cssRefreshCounter >= 10) {
+            c.cssRefreshCounter = 0;
+            try {
+                const newCss = await captureCSS(c.cdp);
+                if (newCss && newCss !== c.css) {
+                    c.css = newCss;
+                    broadcast({ type: 'css_update', cascadeId: c.id });
+                }
+            } catch (e) { }
+        }
     }));
 }
 

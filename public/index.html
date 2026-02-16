@@ -794,6 +794,12 @@
                         renderQuotaBar(currentCascadeId);
                     }
                 }
+
+                if (data.type === 'css_update') {
+                    if (data.cascadeId === currentCascadeId) {
+                        applyCascadeStyles(currentCascadeId);
+                    }
+                }
             };
 
             ws.onclose = () => setTimeout(connect, 2000);
@@ -831,18 +837,31 @@
             renderQuotaBar(id);
         }
 
-        async function loadCascade(id) {
+        async function applyCascadeStyles(id) {
             try {
-                // 1. Fetch Styles (Once)
                 const styleRes = await fetch(`/styles/${id}`);
                 if (styleRes.ok) {
                     const styleData = await styleRes.json();
                     document.getElementById('cascade-style').textContent = `
                         ${styleData.css}
+                        /* Fallback: ensure text is ALWAYS visible regardless of captured CSS */
+                        #chat-viewport {
+                            color: #e5e7eb !important;
+                            background: transparent !important;
+                            font-size: 14px;
+                            line-height: 1.6;
+                        }
+                        #chat-viewport p, #chat-viewport span, #chat-viewport div,
+                        #chat-viewport li, #chat-viewport td, #chat-viewport th,
+                        #chat-viewport h1, #chat-viewport h2, #chat-viewport h3,
+                        #chat-viewport h4, #chat-viewport h5, #chat-viewport h6,
+                        #chat-viewport label, #chat-viewport a {
+                            color: inherit;
+                        }
                         /* Support both legacy #cascade and new #conversation/#chat */
-                        #cascade, #conversation, #chat, #chat-viewport { 
+                        #cascade, #conversation, #chat { 
                             background: transparent !important; 
-                            color: white !important; 
+                            color: #e5e7eb !important; 
                         }
                         #cascade .prose, #conversation .prose, #chat-viewport .prose {
                             --tw-prose-body: #e5e7eb !important;
@@ -867,6 +886,13 @@
                         pre, code { background: #111 !important; color: #ddd !important; }
                     `;
                 }
+            } catch (e) { console.error('CSS refresh failed:', e); }
+        }
+
+        async function loadCascade(id) {
+            try {
+                // 1. Fetch Styles
+                await applyCascadeStyles(id);
 
                 // 2. Fetch Content
                 await updateContentOnly(id);
