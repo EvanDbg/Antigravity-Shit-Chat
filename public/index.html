@@ -1215,6 +1215,93 @@
         let ws = null;
         let quotaCache = {}; // { cascadeId: quotaData }
 
+        // --- Content Cache: per-cascade chunk-level caching ---
+        // Structure: { cascadeId: { chunks: Map<chunkId, {html, order}>, maxOrder: 0, lastBodyBg: '' } }
+        const contentCache = {};
+
+        function getOrCreateCache(cascadeId) {
+            if (!contentCache[cascadeId]) {
+                contentCache[cascadeId] = { chunks: new Map(), maxOrder: 0, lastBodyBg: '' };
+            }
+            return contentCache[cascadeId];
+        }
+
+        // Generate a stable ID for a chunk element
+        function getChunkId(el, index) {
+            // Try unique attributes first
+            const tooltipId = el.querySelector('[data-tooltip-id]');
+            if (tooltipId) return 'tip-' + tooltipId.getAttribute('data-tooltip-id');
+            if (el.id) return 'id-' + el.id;
+            // Use tag + class + structural position as fallback
+            const cls = (el.className || '').toString().replace(/\s+/g, '.').slice(0, 80);
+            return `pos-${index}-${el.tagName}-${cls}`;
+        }
+
+        // Simple hash for content comparison
+        function quickHash(str) {
+            let h = 0;
+            for (let i = 0; i < str.length; i++) {
+                h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+            }
+            return h;
+        }
+
+        // Parse HTML string into chunk elements
+        function parseChunks(html) {
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+            // The HTML is the outerHTML of #cascade/#conversation/#chat container
+            // Get its children (the actual message elements)
+            const container = temp.firstElementChild || temp;
+            return Array.from(container.children);
+        }
+
+        // Merge new chunks into cache, returns ordered array of all cached chunks
+        function mergeIntoCache(cascadeId, newChunkEls) {
+            const cache = getOrCreateCache(cascadeId);
+            const seen = new Set();
+
+            newChunkEls.forEach((el, i) => {
+                const id = getChunkId(el, i);
+                seen.add(id);
+                const html = el.outerHTML;
+                const existing = cache.chunks.get(id);
+
+                if (!existing) {
+                    // New chunk — assign order
+                    cache.chunks.set(id, { html, order: cache.maxOrder++, hash: quickHash(html) });
+                } else {
+                    // Existing chunk — update content if changed (e.g., AI still generating)
+                    const newHash = quickHash(html);
+                    if (newHash !== existing.hash) {
+                        existing.html = html;
+                        existing.hash = newHash;
+                    }
+                }
+            });
+
+            // Don't delete old chunks — they're cached history!
+            // But cap at 800 chunks to prevent memory bloat
+            if (cache.chunks.size > 800) {
+                const sorted = [...cache.chunks.entries()].sort((a, b) => a[1].order - b[1].order);
+                const toDelete = sorted.slice(0, cache.chunks.size - 800);
+                toDelete.forEach(([k]) => cache.chunks.delete(k));
+            }
+
+            return cache;
+        }
+
+        // Build full HTML from cache
+        function buildFromCache(cascadeId, containerTag) {
+            const cache = contentCache[cascadeId];
+            if (!cache || cache.chunks.size === 0) return null;
+
+            const sorted = [...cache.chunks.values()].sort((a, b) => a.order - b.order);
+            const inner = sorted.map(c => c.html).join('');
+            // Wrap in the original container tag
+            return `<${containerTag} id="chat-viewport">${inner}</${containerTag}>`;
+        }
+
         function getQuotaColor(pct) {
             if (pct === null || pct === undefined) return '#555';
             if (pct >= 50) return '#4ade80';
@@ -1391,6 +1478,19 @@
         function selectCascade(id) {
             currentCascadeId = id;
             renderTabs();
+
+            // Instantly restore from cache if available (no network wait)
+            const cache = contentCache[id];
+            if (cache && cache.chunks.size > 0) {
+                const cachedHtml = buildFromCache(id, 'div');
+                if (cachedHtml) {
+                    chatContent.innerHTML = cachedHtml;
+                    document.body.style.backgroundColor = cache.lastBodyBg || '#1a1a1a';
+                    reprocessClickables();
+                }
+            }
+
+            // Then refresh from server in background
             loadCascade(id);
             renderQuotaBar(id);
         }
@@ -1457,31 +1557,61 @@
             } catch (e) { console.error(e); }
         }
 
+        // Post-process clickable elements for file name detection
+        function reprocessClickables() {
+            const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
+            chatContent.querySelectorAll('[data-cdp-click]').forEach(el => {
+                if (el.hasAttribute('data-file-name')) return;
+                const text = (el.textContent || '').trim();
+                const match = text.match(fileExtPattern);
+                if (match) {
+                    el.setAttribute('data-file-name', match[1]);
+                }
+            });
+        }
+
         async function updateContentOnly(id) {
             try {
                 const res = await fetch(`/snapshot/${id}`);
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
 
-                // Preserve Scroll
+                // Preserve scroll position
                 const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 50;
+                const prevScrollTop = chatContainer.scrollTop;
 
                 document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
-                // Wrap content in a viewport container for CSS scoping
-                chatContent.innerHTML = `<div id="chat-viewport">${data.html}</div>`;
 
-                // Post-process: detect file names on clickable elements
-                const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
-                chatContent.querySelectorAll('[data-cdp-click]').forEach(el => {
-                    if (el.hasAttribute('data-file-name')) return; // already set by server
-                    const text = (el.textContent || '').trim();
-                    const match = text.match(fileExtPattern);
-                    if (match) {
-                        el.setAttribute('data-file-name', match[1]);
-                    }
-                });
+                // --- Chunk-based caching ---
+                const newChunks = parseChunks(data.html);
 
-                if (isAtBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+                if (newChunks.length === 0) {
+                    // Empty snapshot — keep cached content if available
+                    return;
+                }
+
+                // Merge into cache
+                const cache = mergeIntoCache(id, newChunks);
+                cache.lastBodyBg = data.bodyBg || '#1a1a1a';
+
+                // Only re-render if this is the currently viewed cascade
+                if (id !== currentCascadeId) return;
+
+                // Build full HTML from cache and render
+                const fullHtml = buildFromCache(id, 'div');
+                if (fullHtml) {
+                    chatContent.innerHTML = fullHtml;
+                }
+
+                // Post-process clickables
+                reprocessClickables();
+
+                // Scroll: stick to bottom if was at bottom, otherwise preserve position
+                if (isAtBottom) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                } else {
+                    chatContainer.scrollTop = prevScrollTop;
+                }
             } catch (e) { }
         }
 
