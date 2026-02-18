@@ -1215,19 +1215,219 @@
         let ws = null;
         let quotaCache = {}; // { cascadeId: quotaData }
 
-        // --- Content Cache: simple snapshot-level caching ---
-        // Caches the best (longest) snapshot per cascade to prevent blank displays.
-        // Also caches unique message blocks using text fingerprint for accumulation.
-        // Structure: { cascadeId: { html, bodyBg, htmlLength } }
-        const snapshotCache = {};
+        // --- Content Cache V2: text-fingerprint accumulation ---
+        // Each message chunk is identified by a hash of its text content (first 80 chars).
+        // When snapshots overlap, overlapping chunks anchor new ones in the correct position.
+        // Structure: { cascadeId: { sequence: [{fp, html}], indexMap: Map<fp, idx>, bodyBg, lastScrollDir } }
+        const contentCache = {};
+        const lastScrollInfo = {}; // { cascadeId: { scrollTop, scrollHeight, dir } }
 
-        // Simple hash for content comparison
+        // Simple hash for string comparison
         function quickHash(str) {
             let h = 0;
             for (let i = 0; i < str.length; i++) {
                 h = ((h << 5) - h + str.charCodeAt(i)) | 0;
             }
             return h;
+        }
+
+        // Generate text fingerprint for a chunk element
+        function getTextFingerprint(el) {
+            const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            if (text.length < 3) return null; // skip near-empty elements (spacers, etc.)
+            return quickHash(text);
+        }
+
+        // Parse snapshot HTML into chunk elements
+        // The IDE nests messages several levels deep. We walk down to find the
+        // container with the most children (the message list).
+        function parseSnapshotChunks(html) {
+            const temp = document.createElement('div');
+            temp.innerHTML = html;
+
+            // Walk down the tree: follow the child with the most children
+            // until we find a node with 5+ children (the message list)
+            let node = temp.firstElementChild || temp;
+            for (let depth = 0; depth < 10; depth++) {
+                if (node.children.length >= 5) break; // found the message container
+                // Follow the child with most children
+                let best = null, bestCount = 0;
+                for (const ch of node.children) {
+                    if (ch.children.length > bestCount) {
+                        best = ch;
+                        bestCount = ch.children.length;
+                    }
+                }
+                if (!best || bestCount === 0) break;
+                node = best;
+            }
+
+            // Filter out empty spacer/skeleton elements
+            return Array.from(node.children).filter(ch => {
+                const text = (ch.textContent || '').trim();
+                return text.length > 5; // skip empty divs / spacers / skeletons
+            });
+        }
+
+        function getOrCreateCache(cascadeId) {
+            if (!contentCache[cascadeId]) {
+                contentCache[cascadeId] = {
+                    sequence: [],     // [{fp, html}] in correct conversation order
+                    indexMap: new Map(), // fp -> index in sequence
+                    bodyBg: '#1a1a1a',
+                    lastSnapshotHtml: '' // latest full snapshot used as wrapper template
+                };
+            }
+            return contentCache[cascadeId];
+        }
+
+        // Rebuild indexMap from sequence
+        function rebuildIndexMap(cache) {
+            cache.indexMap.clear();
+            cache.sequence.forEach((item, i) => {
+                cache.indexMap.set(item.fp, i);
+            });
+        }
+
+        // Merge new snapshot chunks into the cache
+        function mergeSnapshot(cascadeId, newChunkEls, scrollDir) {
+            const cache = getOrCreateCache(cascadeId);
+            const newItems = [];
+            for (const el of newChunkEls) {
+                const fp = getTextFingerprint(el);
+                if (fp === null) continue;
+                newItems.push({ fp, html: el.outerHTML });
+            }
+            if (newItems.length === 0) return cache;
+
+            // First snapshot ever — just set it
+            if (cache.sequence.length === 0) {
+                cache.sequence = newItems;
+                rebuildIndexMap(cache);
+                console.log(`[CACHE] init: ${newItems.length} chunks`);
+                return cache;
+            }
+
+            // Find overlap: first new item that exists in cache
+            let anchorNewIdx = -1;
+            let anchorCacheIdx = -1;
+            for (let i = 0; i < newItems.length; i++) {
+                const cacheIdx = cache.indexMap.get(newItems[i].fp);
+                if (cacheIdx !== undefined) {
+                    anchorNewIdx = i;
+                    anchorCacheIdx = cacheIdx;
+                    break;
+                }
+            }
+
+            if (anchorNewIdx >= 0) {
+                // We have overlap — use anchor to position everything
+                // Items before the anchor in new snapshot
+                const beforeAnchor = newItems.slice(0, anchorNewIdx);
+                // Items from anchor onward in new snapshot
+                const fromAnchor = newItems.slice(anchorNewIdx);
+
+                // Where to insert the "before" items in cache
+                const insertBeforeIdx = anchorCacheIdx;
+
+                // Insert items BEFORE the anchor that don't already exist
+                let insertPos = insertBeforeIdx;
+                for (let i = beforeAnchor.length - 1; i >= 0; i--) {
+                    if (!cache.indexMap.has(beforeAnchor[i].fp)) {
+                        cache.sequence.splice(insertPos, 0, beforeAnchor[i]);
+                        insertPos = insertPos; // next one goes before this one too
+                    }
+                }
+
+                // Update/append items FROM the anchor onward
+                // Recalculate anchorCacheIdx after possible inserts
+                rebuildIndexMap(cache);
+                const newAnchorIdx = cache.indexMap.get(newItems[anchorNewIdx].fp);
+
+                for (let i = 0; i < fromAnchor.length; i++) {
+                    const targetIdx = newAnchorIdx + i;
+                    const existing = cache.indexMap.get(fromAnchor[i].fp);
+
+                    if (existing !== undefined) {
+                        // Update existing chunk (content may have changed, e.g. AI generating)
+                        cache.sequence[existing].html = fromAnchor[i].html;
+                    } else if (targetIdx >= cache.sequence.length) {
+                        // Append at end
+                        cache.sequence.push(fromAnchor[i]);
+                    } else {
+                        // Insert at correct position
+                        cache.sequence.splice(targetIdx, 0, fromAnchor[i]);
+                    }
+                }
+
+                rebuildIndexMap(cache);
+                console.log(`[CACHE] merge (overlap at new[${anchorNewIdx}]→cache[${anchorCacheIdx}]): total=${cache.sequence.length}`);
+            } else {
+                // No overlap — use scroll direction to decide where to put new items
+                const existingFps = new Set(cache.indexMap.keys());
+                const trulyNew = newItems.filter(it => !existingFps.has(it.fp));
+
+                if (trulyNew.length === 0) {
+                    // All items already in cache, just update HTML
+                    for (const item of newItems) {
+                        const idx = cache.indexMap.get(item.fp);
+                        if (idx !== undefined) cache.sequence[idx].html = item.html;
+                    }
+                    console.log(`[CACHE] merge (all existing, updated HTML)`);
+                } else if (scrollDir === 'up') {
+                    // Scrolled up → new content is ABOVE existing
+                    cache.sequence = [...trulyNew, ...cache.sequence];
+                    rebuildIndexMap(cache);
+                    console.log(`[CACHE] merge (no overlap, prepend ${trulyNew.length}): total=${cache.sequence.length}`);
+                } else {
+                    // Scrolled down or unknown → new content is BELOW existing
+                    cache.sequence = [...cache.sequence, ...trulyNew];
+                    rebuildIndexMap(cache);
+                    console.log(`[CACHE] merge (no overlap, append ${trulyNew.length}): total=${cache.sequence.length}`);
+                }
+            }
+
+            // Cap at 500 chunks
+            if (cache.sequence.length > 500) {
+                cache.sequence = cache.sequence.slice(cache.sequence.length - 500);
+                rebuildIndexMap(cache);
+            }
+
+            return cache;
+        }
+
+        // Build full HTML from cache, preserving the message container styling
+        function buildCacheHtml(cascadeId) {
+            const cache = contentCache[cascadeId];
+            if (!cache || cache.sequence.length === 0) return null;
+            if (!cache.lastSnapshotHtml) return null;
+
+            // Parse the template to find the message container class
+            const temp = document.createElement('div');
+            temp.innerHTML = cache.lastSnapshotHtml;
+
+            // Walk down to find the message container
+            let node = temp.firstElementChild || temp;
+            let msgContainerClass = '';
+            for (let depth = 0; depth < 10; depth++) {
+                if (node.children.length >= 5) {
+                    msgContainerClass = node.className || '';
+                    break;
+                }
+                let best = null, bestCount = 0;
+                for (const ch of node.children) {
+                    if (ch.children.length > bestCount) {
+                        best = ch;
+                        bestCount = ch.children.length;
+                    }
+                }
+                if (!best || bestCount === 0) break;
+                node = best;
+            }
+
+            // Build a simple structure: viewport > message container with accumulated messages
+            const messagesHtml = cache.sequence.map(c => c.html).join('');
+            return '<div id="chat-viewport"><div class="' + msgContainerClass + '" style="padding:8px 16px;">' + messagesHtml + '</div></div>';
         }
 
         function getQuotaColor(pct) {
@@ -1407,13 +1607,14 @@
             currentCascadeId = id;
             renderTabs();
 
-            // Instantly restore from snapshot cache if available (no network wait)
-            const cached = snapshotCache[id];
-            if (cached && cached.html) {
-                chatContent.innerHTML = `<div id="chat-viewport">${cached.html}</div>`;
-                document.body.style.backgroundColor = cached.bodyBg || '#1a1a1a';
+            // Instantly restore from accumulated cache (no network wait)
+            const cached = buildCacheHtml(id);
+            if (cached) {
+                chatContent.innerHTML = cached;
+                const cache = contentCache[id];
+                document.body.style.backgroundColor = (cache && cache.bodyBg) || '#1a1a1a';
                 reprocessClickables();
-                console.log(`[CACHE] selectCascade restored from cache, len=${cached.htmlLength}`);
+                console.log(`[CACHE] selectCascade restored ${contentCache[id].sequence.length} chunks`);
             }
 
             // Then refresh from server in background
@@ -1507,26 +1708,30 @@
                 const prevScrollTop = chatContainer.scrollTop;
 
                 const newHtml = data.html || '';
-                const newLen = newHtml.length;
+                if (newHtml.length < 10) return; // skip empty snapshots
 
-                // --- Simple snapshot cache ---
-                // Always update cache with latest snapshot (regardless of length)
-                // The server captures whatever's visible in the IDE right now
-                snapshotCache[id] = {
-                    html: newHtml,
-                    bodyBg: data.bodyBg || '#1a1a1a',
-                    htmlLength: newLen,
-                    hash: quickHash(newHtml),
-                    timestamp: Date.now()
-                };
-                console.log(`[CACHE] updateContentOnly: id=${id} len=${newLen} hash=${snapshotCache[id].hash}`);
+                // Parse into chunks
+                const chunks = parseSnapshotChunks(newHtml);
+                if (chunks.length === 0) return;
+
+                // Determine scroll direction
+                const scrollInfo = lastScrollInfo[id];
+                const scrollDir = scrollInfo ? scrollInfo.dir : 'down';
+
+                // Merge into cache (accumulate!)
+                const cache = mergeSnapshot(id, chunks, scrollDir);
+                cache.bodyBg = data.bodyBg || '#1a1a1a';
+                cache.lastSnapshotHtml = newHtml; // save as template for buildCacheHtml
 
                 // Only re-render if this is the currently viewed cascade
                 if (id !== currentCascadeId) return;
 
-                // Render: wrap in viewport container
-                document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
-                chatContent.innerHTML = `<div id="chat-viewport">${newHtml}</div>`;
+                // Render from accumulated cache
+                document.body.style.backgroundColor = cache.bodyBg;
+                const fullHtml = buildCacheHtml(id);
+                if (fullHtml) {
+                    chatContent.innerHTML = fullHtml;
+                }
 
                 // Post-process clickables
                 reprocessClickables();
@@ -1618,13 +1823,21 @@
         // Scroll passthrough: sync web UI scroll position to IDE chat container
         let scrollDebounceTimer = null;
         let scrollSyncLock = false; // prevent feedback loop from snapshot update
+        let _prevScrollTop = 0; // track direction
         chatContainer.addEventListener('scroll', () => {
             if (!currentCascadeId || scrollSyncLock) return;
+            const nowTop = chatContainer.scrollTop;
+            const dir = nowTop < _prevScrollTop ? 'up' : 'down';
+            _prevScrollTop = nowTop;
+
             if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
             scrollDebounceTimer = setTimeout(() => {
                 const maxScroll = chatContainer.scrollHeight - chatContainer.clientHeight;
                 if (maxScroll <= 0) return;
                 const ratio = chatContainer.scrollTop / maxScroll;
+
+                // Save scroll direction for cache merge
+                lastScrollInfo[currentCascadeId] = { dir, ratio };
 
                 const indicator = document.getElementById('scrollLoadingIndicator');
                 if (indicator) indicator.classList.add('active');
@@ -1651,6 +1864,7 @@
                 });
             }, 300); // 300ms debounce
         });
+
 
         // --- File Preview Functions ---
         async function openFilePreview() {
