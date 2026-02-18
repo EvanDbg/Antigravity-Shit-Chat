@@ -1426,7 +1426,9 @@
             }
 
             // Build a simple structure: viewport > message container with accumulated messages
-            const messagesHtml = cache.sequence.map(c => c.html).join('');
+            // Reverse because IDE DOM order is newest-first, but we render oldest-first (top→bottom)
+            const reversed = [...cache.sequence].reverse();
+            const messagesHtml = reversed.map(c => c.html).join('');
             return '<div id="chat-viewport"><div class="' + msgContainerClass + '" style="padding:8px 16px;">' + messagesHtml + '</div></div>';
         }
 
