@@ -147,6 +147,26 @@
             pointer-events: none;
         }
 
+        .scroll-loading-indicator {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 0;
+            text-align: center;
+            font-size: 12px;
+            color: #888;
+            background: linear-gradient(to bottom, rgba(26, 26, 26, 0.95), transparent);
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .scroll-loading-indicator.active {
+            opacity: 1;
+        }
+
         .new-conv-btn,
         .notif-btn,
         .kill-btn {
@@ -626,12 +646,441 @@
             font-size: 13px;
         }
     </style>
+    <style>
+        /* Cyberpunk Toast Notification */
+        .cyber-toast-container {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 99999;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cyber-toast {
+            pointer-events: auto;
+            background: rgba(0, 10, 20, 0.92);
+            border: 1px solid #0ff;
+            border-radius: 4px;
+            padding: 12px 24px;
+            min-width: 300px;
+            max-width: 90vw;
+            box-shadow:
+                0 0 15px rgba(0, 255, 255, 0.3),
+                0 0 30px rgba(0, 255, 255, 0.1),
+                inset 0 0 15px rgba(0, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+            animation: cyberSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            cursor: pointer;
+        }
+
+        .cyber-toast.fade-out {
+            animation: cyberSlideOut 0.5s ease forwards;
+        }
+
+        /* Scan line overlay */
+        .cyber-toast::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 255, 255, 0.03) 2px,
+                    rgba(0, 255, 255, 0.03) 4px);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Glitch stripe */
+        .cyber-toast::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.08), transparent);
+            animation: cyberSweep 2s ease-in-out infinite;
+            z-index: 0;
+        }
+
+        .cyber-toast-title {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            font-weight: 700;
+            color: #0ff;
+            text-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+            letter-spacing: 1px;
+            position: relative;
+            z-index: 2;
+            animation: cyberGlitch 3s infinite;
+        }
+
+        .cyber-toast-body {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: rgba(0, 255, 255, 0.6);
+            margin-top: 4px;
+            letter-spacing: 0.5px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .cyber-toast-indicator {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #0ff, #f0f, #0ff);
+            box-shadow: 0 0 6px #0ff;
+            animation: cyberProgress 3s linear forwards;
+        }
+
+        @keyframes cyberSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px) scaleY(0.8);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scaleY(1);
+            }
+        }
+
+        @keyframes cyberSlideOut {
+            from {
+                opacity: 1;
+                transform: translateY(0) scaleY(1);
+            }
+
+            to {
+                opacity: 0;
+                transform: translateY(-20px) scaleY(0.8);
+            }
+        }
+
+        @keyframes cyberSweep {
+            0% {
+                left: -50%;
+            }
+
+            100% {
+                left: 150%;
+            }
+        }
+
+        @keyframes cyberGlitch {
+
+            0%,
+            92%,
+            100% {
+                transform: none;
+            }
+
+            93% {
+                transform: translate(-2px, 1px);
+            }
+
+            94% {
+                transform: translate(2px, -1px);
+            }
+
+            95% {
+                transform: translate(-1px, 0);
+            }
+        }
+
+        @keyframes cyberProgress {
+            from {
+                width: 100%;
+            }
+
+            to {
+                width: 0%;
+            }
+        }
+    </style>
     <style id="cascade-style">
         /* Dynamic styles will be injected here */
+    </style>
+    <!-- File Preview Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <style>
+        /* File Preview Modal */
+        .file-preview-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
+        }
+
+        .file-preview-overlay.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        .file-preview-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px 20px;
+            background: rgba(30, 30, 30, 0.95);
+            border-bottom: 1px solid #3a3a3a;
+            flex-shrink: 0;
+        }
+
+        .file-preview-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #e0e0e0;
+            font-weight: 600;
+            min-width: 0;
+        }
+
+        .file-preview-title .file-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .file-preview-title .file-name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-preview-title .file-ext-badge {
+            background: #2563eb;
+            color: #93c5fd;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+
+        .file-preview-close {
+            background: none;
+            border: 1px solid #444;
+            color: #aaa;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 6px 16px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .file-preview-close:hover {
+            background: #333;
+            color: #fff;
+            border-color: #666;
+        }
+
+        .file-preview-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Markdown rendering */
+        .file-preview-body .markdown-content {
+            padding: 20px 28px;
+            color: #e0e0e0;
+            line-height: 1.7;
+            font-size: 15px;
+        }
+
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3,
+        .markdown-content h4,
+        .markdown-content h5,
+        .markdown-content h6 {
+            color: #f0f0f0;
+            margin: 1.2em 0 0.5em;
+            font-weight: 600;
+        }
+
+        .markdown-content h1 {
+            font-size: 1.8em;
+            border-bottom: 1px solid #333;
+            padding-bottom: 8px;
+        }
+
+        .markdown-content h2 {
+            font-size: 1.4em;
+            border-bottom: 1px solid #2a2a2a;
+            padding-bottom: 6px;
+        }
+
+        .markdown-content h3 {
+            font-size: 1.15em;
+        }
+
+        .markdown-content p {
+            margin: 0.8em 0;
+        }
+
+        .markdown-content a {
+            color: #60a5fa;
+            text-decoration: underline;
+        }
+
+        .markdown-content code {
+            background: #1a1a2e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #e2b3ff;
+        }
+
+        .markdown-content pre {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+
+        .markdown-content pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+
+        .markdown-content ul,
+        .markdown-content ol {
+            padding-left: 1.5em;
+            margin: 0.5em 0;
+        }
+
+        .markdown-content li {
+            margin: 0.3em 0;
+        }
+
+        .markdown-content blockquote {
+            border-left: 3px solid #3b82f6;
+            padding: 4px 16px;
+            margin: 0.8em 0;
+            color: #aaa;
+            background: rgba(59, 130, 246, 0.05);
+            border-radius: 0 6px 6px 0;
+        }
+
+        .markdown-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+        }
+
+        .markdown-content th,
+        .markdown-content td {
+            border: 1px solid #333;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        .markdown-content th {
+            background: #252525;
+            font-weight: 600;
+        }
+
+        .markdown-content img {
+            max-width: 100%;
+            border-radius: 6px;
+        }
+
+        /* Code file rendering */
+        .file-preview-body .code-content {
+            padding: 0;
+        }
+
+        .file-preview-body .code-content pre {
+            margin: 0;
+            padding: 16px 20px;
+            background: #0d1117;
+            border: none;
+            border-radius: 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .file-preview-body .code-content code {
+            background: transparent;
+        }
+
+        /* Loading state */
+        .file-preview-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #888;
+            font-size: 14px;
+        }
+
+        /* Error state */
+        .file-preview-error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #f87171;
+            font-size: 14px;
+        }
+
+        /* Highlight data-file-name elements in chat */
+        [data-file-name] {
+            cursor: pointer !important;
+            text-decoration: underline;
+            text-decoration-color: rgba(96, 165, 250, 0.4);
+            text-underline-offset: 2px;
+        }
+
+        [data-file-name]:hover {
+            text-decoration-color: rgba(96, 165, 250, 0.8);
+            color: #60a5fa !important;
+        }
     </style>
 </head>
 
 <body>
+
+    <!-- Cyberpunk Toast Container -->
+    <div class="cyber-toast-container" id="cyberToastContainer"></div>
 
     <div class="headers-container">
         <div id="tabsContainer" style="display:flex;flex:1;overflow-x:auto;">
@@ -649,6 +1098,7 @@
     </div>
 
     <div class="chat-container" id="chatContainer">
+        <div class="scroll-loading-indicator" id="scrollLoadingIndicator">⏳ 加载历史内容...</div>
         <div class="chat-content" id="chatContent">
             <div class="loading">Waiting for connection...</div>
         </div>
@@ -669,6 +1119,21 @@
             <div class="modal-body" id="acctModalBody">
                 <div class="modal-loading">Loading accounts...</div>
             </div>
+        </div>
+    </div>
+
+    <!-- File Preview Modal -->
+    <div class="file-preview-overlay" id="filePreviewModal" onclick="if(event.target===this)closeFilePreview()">
+        <div class="file-preview-header">
+            <div class="file-preview-title">
+                <span class="file-icon">📄</span>
+                <span class="file-name" id="filePreviewName">file.md</span>
+                <span class="file-ext-badge" id="filePreviewExt">MD</span>
+            </div>
+            <button class="file-preview-close" onclick="closeFilePreview()">✕ Close</button>
+        </div>
+        <div class="file-preview-body" id="filePreviewBody">
+            <div class="file-preview-loading">Loading...</div>
         </div>
     </div>
 
@@ -796,9 +1261,38 @@
                         applyCascadeStyles(currentCascadeId);
                     }
                 }
+
+                if (data.type === 'ai_complete') {
+                    showCyberToast(data.title || 'Unknown', data.cascadeId);
+                }
             };
 
             ws.onclose = () => setTimeout(connect, 2000);
+        }
+
+        function showCyberToast(title, cascadeId) {
+            const container = document.getElementById('cyberToastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'cyber-toast';
+            toast.innerHTML = `
+                <div class="cyber-toast-title">⚡ SIGNAL :: ${title}</div>
+                <div class="cyber-toast-body">「Neural link complete」— AI transmission received</div>
+                <div class="cyber-toast-indicator"></div>
+            `;
+            // Click to switch to that cascade tab
+            toast.addEventListener('click', () => {
+                if (cascadeId) selectCascade(cascadeId);
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 500);
+            });
+            container.appendChild(toast);
+            // Auto-dismiss after 3s
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.classList.add('fade-out');
+                    setTimeout(() => toast.remove(), 500);
+                }
+            }, 3000);
         }
 
         function renderTabs() {
@@ -908,6 +1402,17 @@
                 // Wrap content in a viewport container for CSS scoping
                 chatContent.innerHTML = `<div id="chat-viewport">${data.html}</div>`;
 
+                // Post-process: detect file names on clickable elements
+                const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
+                chatContent.querySelectorAll('[data-cdp-click]').forEach(el => {
+                    if (el.hasAttribute('data-file-name')) return; // already set by server
+                    const text = (el.textContent || '').trim();
+                    const match = text.match(fileExtPattern);
+                    if (match) {
+                        el.setAttribute('data-file-name', match[1]);
+                    }
+                });
+
                 if (isAtBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
             } catch (e) { }
         }
@@ -955,6 +1460,11 @@
             clickable.classList.add('cdp-clicking');
 
             try {
+                // Step 1: Record current tab BEFORE click
+                const beforeRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                const beforeTab = await beforeRes.json();
+
+                // Step 2: Execute the click
                 const res = await fetch(`/click/${currentCascadeId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -962,11 +1472,149 @@
                 });
                 const data = await res.json();
                 if (!res.ok) console.warn('Click failed:', data.error);
+
+                // Step 3: Wait for editor to respond
+                await new Promise(r => setTimeout(r, 500));
+
+                // Step 4: Check if tab changed → a file/artifact was opened
+                const afterRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                const afterTab = await afterRes.json();
+
+                if (afterTab.name && afterTab.name !== beforeTab.name) {
+                    // Tab changed — a new file/artifact opened, show preview
+                    openFilePreview();
+                }
+                // If tab didn't change, it was an expand/collapse or action button — no preview
             } catch (err) {
                 console.error('Click passthrough error:', err);
             } finally {
                 setTimeout(() => clickable.classList.remove('cdp-clicking'), 300);
             }
+        });
+
+        // Scroll passthrough: sync web UI scroll position to IDE chat container
+        let scrollDebounceTimer = null;
+        let scrollSyncLock = false; // prevent feedback loop from snapshot update
+        chatContainer.addEventListener('scroll', () => {
+            if (!currentCascadeId || scrollSyncLock) return;
+            if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
+            scrollDebounceTimer = setTimeout(() => {
+                const maxScroll = chatContainer.scrollHeight - chatContainer.clientHeight;
+                if (maxScroll <= 0) return;
+                const ratio = chatContainer.scrollTop / maxScroll;
+
+                const indicator = document.getElementById('scrollLoadingIndicator');
+                if (indicator) indicator.classList.add('active');
+
+                fetch(`/scroll/${currentCascadeId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ratio })
+                }).then(r => r.json()).then(data => {
+                    // Wait for snapshot refresh after IDE scrolls + lazy loads
+                    setTimeout(() => {
+                        scrollSyncLock = true;
+                        updateContentOnly(currentCascadeId).finally(() => {
+                            setTimeout(() => { scrollSyncLock = false; }, 200);
+                        });
+                    }, 400);
+                }).catch(e => {
+                    console.error('Scroll sync error:', e);
+                }).finally(() => {
+                    setTimeout(() => {
+                        const ind = document.getElementById('scrollLoadingIndicator');
+                        if (ind) ind.classList.remove('active');
+                    }, 600);
+                });
+            }, 300); // 300ms debounce
+        });
+
+        // --- File Preview Functions ---
+        async function openFilePreview() {
+            const modal = document.getElementById('filePreviewModal');
+            const body = document.getElementById('filePreviewBody');
+            const nameEl = document.getElementById('filePreviewName');
+            const extEl = document.getElementById('filePreviewExt');
+
+            // Show modal with loading
+            nameEl.textContent = 'Loading...';
+            extEl.textContent = '';
+            modal.classList.add('active');
+            body.innerHTML = '<div class="file-preview-loading">⏳ Loading file content...</div>';
+
+            try {
+                const res = await fetch(`/api/active-file/${currentCascadeId}`);
+                if (!res.ok) {
+                    const err = await res.json();
+                    body.innerHTML = `<div class="file-preview-error">❌ ${err.error || 'Failed to load file'}</div>`;
+                    return;
+                }
+                const data = await res.json();
+
+                if (data.type === 'artifact') {
+                    // System artifact: inject rendered HTML directly
+                    nameEl.textContent = data.name;
+                    extEl.textContent = 'ARTIFACT';
+                    body.innerHTML = `<div class="markdown-content artifact-content">${data.html}</div>`;
+                } else {
+                    // Normal file
+                    nameEl.textContent = data.filename;
+                    extEl.textContent = (data.ext || '').toUpperCase();
+                    if (data.ext === 'md') {
+                        renderMarkdown(body, data.content);
+                    } else {
+                        renderCode(body, data.content, data.ext);
+                    }
+                }
+            } catch (err) {
+                body.innerHTML = `<div class="file-preview-error">❌ Network error: ${err.message}</div>`;
+            }
+        }
+
+        function renderMarkdown(container, content) {
+            if (typeof marked !== 'undefined') {
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true,
+                    highlight: function (code, lang) {
+                        if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+                            return hljs.highlight(code, { language: lang }).value;
+                        }
+                        return code;
+                    }
+                });
+                container.innerHTML = `<div class="markdown-content">${marked.parse(content)}</div>`;
+            } else {
+                // Fallback: render as preformatted text
+                container.innerHTML = `<div class="markdown-content"><pre>${escapeHtml(content)}</pre></div>`;
+            }
+        }
+
+        function renderCode(container, content, ext) {
+            const escaped = escapeHtml(content);
+            container.innerHTML = `<div class="code-content"><pre><code class="language-${ext}">${escaped}</code></pre></div>`;
+            // Apply highlight.js
+            if (typeof hljs !== 'undefined') {
+                container.querySelectorAll('pre code').forEach(block => {
+                    hljs.highlightElement(block);
+                });
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function closeFilePreview() {
+            document.getElementById('filePreviewModal').classList.remove('active');
+        }
+        window.closeFilePreview = closeFilePreview;
+
+        // Close file preview on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeFilePreview();
         });
 
         // New Conversation button

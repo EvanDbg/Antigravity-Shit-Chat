@@ -5,10 +5,12 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
+import path from 'path';
 import { dirname, join } from 'path';
-import { spawn, exec } from 'child_process';
+import { spawn, exec, execSync } from 'child_process';
 import { createHmac, randomBytes } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
+import os from 'os';
 import webpush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,7 +34,18 @@ const POLL_INTERVAL = 3000;
 
 // Auth config (config.json > env vars > defaults)
 const AUTH_PASSWORD = userConfig.password || process.env.PASSWORD || 'shitchat';
-const AUTH_SECRET = process.env.AUTH_SECRET || randomBytes(32).toString('hex');
+// Persist AUTH_SECRET so cookies survive server restarts
+let AUTH_SECRET = userConfig.authSecret || process.env.AUTH_SECRET;
+if (!AUTH_SECRET) {
+    AUTH_SECRET = randomBytes(32).toString('hex');
+    userConfig.authSecret = AUTH_SECRET;
+    try {
+        writeFileSync(configPath, JSON.stringify(userConfig, null, 2));
+        console.log('🔑 Generated and saved AUTH_SECRET to config.json');
+    } catch (e) {
+        console.warn('⚠️ Could not persist AUTH_SECRET to config.json');
+    }
+}
 function getDefaultAntigravityPath() {
     if (process.platform === 'darwin') {
         // macOS: standard .app bundle locations
@@ -385,8 +398,16 @@ async function captureHTML(cdp) {
         const clone = target.cloneNode(true);
         // Tag clone elements with matching indexes
         const cloneClickables = Array.from(clone.querySelectorAll(clickSelector));
+        // File extension pattern for detection
+        const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
         cloneClickables.forEach((el, i) => {
             if (i < liveClickables.length) el.setAttribute('data-cdp-click', i);
+            // Detect file links by text content matching file patterns
+            const text = (el.textContent || '').trim();
+            const match = text.match(fileExtPattern);
+            if (match) {
+                el.setAttribute('data-file-name', match[1]);
+            }
         });
 
         // Remove input box to keep snapshot clean
@@ -398,11 +419,24 @@ async function captureHTML(cdp) {
         
         const bodyStyles = window.getComputedStyle(document.body);
 
+        // Detect AI completion feedback buttons by their unique data-tooltip-id attributes
+        const feedbackUp = target.querySelector('[data-tooltip-id^="up-"]');
+        const feedbackDown = target.querySelector('[data-tooltip-id^="down-"]');
+        const hasFeedbackButtons = !!(feedbackUp && feedbackDown);
+
+        // Extract fingerprint: use feedback button's data-tooltip-id (contains React unique ID per message)
+        let feedbackFingerprint = null;
+        if (hasFeedbackButtons) {
+            feedbackFingerprint = feedbackUp.getAttribute('data-tooltip-id') || null;
+        }
+
         return {
             html: clone.outerHTML,
             bodyBg: bodyStyles.backgroundColor,
             bodyColor: bodyStyles.color,
-            clickMap: selectorMap
+            clickMap: selectorMap,
+            hasFeedbackButtons,
+            feedbackFingerprint
         };
     })()`;
 
@@ -417,6 +451,22 @@ async function captureHTML(cdp) {
         });
         if (result.result?.value && !result.result.value.error) {
             return result.result.value;
+        }
+    } catch (e) { }
+
+    // Retry once: refresh context and try again
+    try {
+        const meta = await extractMetadata(cdp);
+        if (meta?.contextId && meta.contextId !== contextId) {
+            cdp.rootContextId = meta.contextId;
+            const result = await cdp.call("Runtime.evaluate", {
+                expression: SCRIPT,
+                returnByValue: true,
+                contextId: meta.contextId
+            });
+            if (result.result?.value && !result.result.value.error) {
+                return result.result.value;
+            }
         }
     } catch (e) { }
     return null;
@@ -478,7 +528,7 @@ async function discover() {
                     quota: null,
                     quotaHash: null,
                     stableCount: 0,
-                    notified: false
+                    lastFeedbackFingerprint: null
                 };
                 newCascades.set(id, cascade);
                 console.log(`鉁?Added cascade: ${meta.chatTitle}`);
@@ -516,33 +566,34 @@ async function updateSnapshots() {
                     const newLen = snap.html.length;
                     const lenDiff = Math.abs(newLen - oldLen);
 
-                    c.snapshot = snap;
-                    c.snapshotHash = hash;
-                    c.contentLength = newLen;
-                    c.stableCount = 0;
+                    // Protect against empty/short snapshots overwriting good content
+                    if (newLen < 200 && oldLen > 500) {
+                        console.warn(`⚠️ Skipping short snapshot (${newLen} chars) for "${c.metadata.chatTitle}" (keeping ${oldLen} chars)`);
+                        c.stableCount = (c.stableCount || 0) + 1;
+                    } else {
+                        c.snapshot = snap;
+                        c.snapshotHash = hash;
+                        c.contentLength = newLen;
+                        c.stableCount = 0;
 
-                    // Only reset notified if content changed significantly (>50 chars)
-                    // This filters out trivial changes like timestamps updating
-                    if (lenDiff > 50) {
-                        c.notified = false;
+                        broadcast({ type: 'snapshot_update', cascadeId: c.id });
                     }
-
-                    broadcast({ type: 'snapshot_update', cascadeId: c.id });
                 } else {
                     c.stableCount = (c.stableCount || 0) + 1;
                 }
             }
         } catch (e) { }
 
-        // AI completion detection: stable for ~9s (3 polls * 3s) after significant changes
-        // With 2-minute cooldown to prevent notification spam
-        const NOTIFY_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
-        const now = Date.now();
-        const lastNotif = c.lastNotifiedAt || 0;
-        if (c.stableCount === 3 && !c.notified && c.snapshot && (now - lastNotif > NOTIFY_COOLDOWN_MS)) {
-            c.notified = true;
-            c.lastNotifiedAt = now;
-            sendPushNotification(c);
+        // AI completion detection: fingerprint-based dedup
+        // Only notify when feedback buttons appear AND the fingerprint changed
+        if (c.snapshot?.hasFeedbackButtons && c.snapshot.feedbackFingerprint) {
+            const fp = c.snapshot.feedbackFingerprint;
+            if (fp !== c.lastFeedbackFingerprint) {
+                c.lastFeedbackFingerprint = fp;
+                console.log(`🔔 New AI completion for "${c.metadata.chatTitle}" (fp: ${fp}) — sending notification`);
+                broadcast({ type: 'ai_complete', cascadeId: c.id, title: c.metadata.chatTitle });
+                sendPushNotification(c);
+            }
         }
 
         // Quota polling
@@ -810,6 +861,130 @@ async function main() {
         res.json(c.quota || { statusText: '', planName: null, models: [] });
     });
 
+    // --- Active Tab Name API (lightweight, for before/after click detection) ---
+    app.get('/api/active-tab-name/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            const allContexts = c.cdp.contexts || [];
+            for (const ctx of allContexts) {
+                try {
+                    const r = await c.cdp.call('Runtime.evaluate', {
+                        expression: `(() => {
+                            const tab = document.querySelector('.tab.active.selected[data-resource-name]');
+                            return tab ? tab.getAttribute('data-resource-name') : null;
+                        })()`,
+                        returnByValue: true,
+                        contextId: ctx.id
+                    });
+                    if (r.result?.value) {
+                        return res.json({ name: r.result.value });
+                    }
+                } catch (e) { continue; }
+            }
+            res.json({ name: null });
+        } catch (e) {
+            res.json({ name: null });
+        }
+    });
+
+    // --- Active File API (reads from Editor's active tab via CDP) ---
+    app.get('/api/active-file/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            // Step 1: Find the main window context (not the chat iframe)
+            // rootContextId is the chat iframe context — tabs live in the main window
+            const allContexts = c.cdp.contexts || [];
+            let tabInfo = null;
+            let mainContextId = null;
+
+            for (const ctx of allContexts) {
+                try {
+                    const r = await c.cdp.call('Runtime.evaluate', {
+                        expression: `(() => {
+                            const tab = document.querySelector('.tab.active.selected[data-resource-name]');
+                            if (!tab) return null;
+                            const name = tab.getAttribute('data-resource-name') || '';
+                            const iconLabel = tab.querySelector('.monaco-icon-label');
+                            const ariaLabel = iconLabel?.getAttribute('aria-label') || '';
+                            const labelDesc = tab.querySelector('.label-description')?.textContent?.trim() || '';
+                            return { name, ariaLabel, labelDesc };
+                        })()`,
+                        returnByValue: true,
+                        contextId: ctx.id
+                    });
+                    if (r.result?.value) {
+                        tabInfo = r.result.value;
+                        mainContextId = ctx.id;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+
+            if (!tabInfo) {
+                return res.status(404).json({ error: 'No active editor tab found' });
+            }
+
+            // Step 2: Check if it's a system artifact (.resolved file)
+            if (tabInfo.name.endsWith('.resolved')) {
+                // Extract rendered HTML from artifact-view (also in the main context)
+                const htmlResult = await c.cdp.call('Runtime.evaluate', {
+                    expression: `(() => {
+                        const content = document.querySelector('.artifact-view .leading-relaxed.select-text');
+                        if (!content) return null;
+                        return content.innerHTML;
+                    })()`,
+                    returnByValue: true,
+                    contextId: mainContextId
+                });
+                const html = htmlResult.result?.value;
+                if (!html) {
+                    return res.status(404).json({ error: 'Could not extract artifact content' });
+                }
+                const artifactType = tabInfo.name.replace('.md.resolved', '').replace(/_/g, ' ');
+                const capitalizedType = artifactType.charAt(0).toUpperCase() + artifactType.slice(1);
+                return res.json({
+                    type: 'artifact',
+                    name: `${capitalizedType}: ${tabInfo.labelDesc}`,
+                    html
+                });
+            }
+
+            // Step 3: Normal file — extract path from aria-label
+            // Format: "~/path/to/file.js • Modified" or just "~/path/to/file.js"
+            let filePath = tabInfo.ariaLabel.replace(/\s•\s.*$/, '').trim();
+            if (!filePath) {
+                return res.status(404).json({ error: 'No file path in active tab' });
+            }
+            // Expand ~ to home directory
+            if (filePath.startsWith('~')) {
+                filePath = filePath.replace('~', os.homedir());
+            }
+
+            console.log(`📂 Active file: "${filePath}" (tab: ${tabInfo.name})`);
+
+            try {
+                const stat = statSync(filePath);
+                if (stat.size > 1024 * 1024) {
+                    return res.status(413).json({ error: 'File too large (>1MB)' });
+                }
+                const content = readFileSync(filePath, 'utf-8');
+                const ext = path.extname(filePath).toLowerCase().slice(1);
+                const filename = path.basename(filePath);
+                res.json({ type: 'file', content, filename, ext, path: filePath });
+            } catch (e) {
+                if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+                res.status(500).json({ error: e.message });
+            }
+        } catch (e) {
+            console.error('Active file error:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // --- Push Notification Routes ---
     app.get('/api/push/vapid-key', (req, res) => {
         res.json({ publicKey: vapidKeys.publicKey });
@@ -877,20 +1052,33 @@ async function main() {
         if (!selector) return res.status(400).json({ error: 'Invalid click index' });
 
         try {
+            // Enhanced: also try to extract the file path from the element context
             const result = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
                     const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
                     if (!el) return { ok: false, reason: 'element not found' };
                     el.click();
-                    return { ok: true, text: el.textContent.substring(0, 50) };
+                    const text = el.textContent.substring(0, 200).trim();
+                    // Try to detect file path from nearby context
+                    let filePath = null;
+                    const href = el.getAttribute('href') || '';
+                    if (href.startsWith('file://')) {
+                        filePath = decodeURIComponent(href.replace('file://', ''));
+                    }
+                    // For VS Code link widgets, check data attributes
+                    const dataUri = el.getAttribute('data-href') || el.closest('[data-href]')?.getAttribute('data-href') || '';
+                    if (!filePath && dataUri.startsWith('file://')) {
+                        filePath = decodeURIComponent(dataUri.replace('file://', ''));
+                    }
+                    return { ok: true, text, filePath };
                 })()`,
                 returnByValue: true,
                 contextId: c.cdp.rootContextId
             });
             const val = result.result?.value;
             if (val?.ok) {
-                console.log(`馃柋锔?Click forwarded: "${val.text}"`);
-                res.json({ success: true, text: val.text });
+                console.log(`🖱️ Click forwarded: "${val.text}"${val.filePath ? ` (file: ${val.filePath})` : ''}`);
+                res.json({ success: true, text: val.text, filePath: val.filePath });
             } else {
                 res.status(500).json({ error: val?.reason || 'click failed' });
             }
@@ -899,7 +1087,70 @@ async function main() {
         }
     });
 
-    // New conversation: click the new-conversation button in the cascade panel
+    // Scroll passthrough: forward scroll events to IDE chat container
+    app.post('/scroll/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        const { deltaY, ratio } = req.body;
+        if (deltaY === undefined && ratio === undefined) {
+            return res.status(400).json({ error: 'deltaY or ratio required' });
+        }
+
+        try {
+            // Use ratio for absolute positioning, deltaY for relative
+            const scrollExpr = ratio !== undefined
+                ? `scrollEl.scrollTop = ${ratio} * (scrollEl.scrollHeight - scrollEl.clientHeight)`
+                : `scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + ${deltaY})`;
+
+            const result = await c.cdp.call('Runtime.evaluate', {
+                expression: `(() => {
+                    const target = document.getElementById('cascade') || document.getElementById('conversation') || document.getElementById('chat');
+                    if (!target) return { error: 'no target' };
+                    function findScrollable(el, depth) {
+                        if (depth > 8) return null;
+                        const s = getComputedStyle(el);
+                        if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) return el;
+                        for (const ch of el.children) { const f = findScrollable(ch, depth + 1); if (f) return f; }
+                        return null;
+                    }
+                    const scrollEl = findScrollable(target, 0);
+                    if (!scrollEl) return { error: 'no scrollable element' };
+                    ${scrollExpr};
+                    return {
+                        scrollTop: scrollEl.scrollTop,
+                        scrollHeight: scrollEl.scrollHeight,
+                        clientHeight: scrollEl.clientHeight
+                    };
+                })()`,
+                returnByValue: true,
+                contextId: c.cdp.rootContextId
+            });
+            const val = result.result?.value;
+            if (val?.error) return res.status(500).json({ error: val.error });
+
+            // Wait for lazy loading to trigger, then refresh snapshot
+            setTimeout(async () => {
+                try {
+                    const snap = await captureHTML(c.cdp);
+                    if (snap && snap.html.length > 200) {
+                        const hash = hashString(snap.html);
+                        if (hash !== c.snapshotHash) {
+                            c.snapshot = snap;
+                            c.snapshotHash = hash;
+                            c.contentLength = snap.html.length;
+                            broadcast({ type: 'snapshot_update', cascadeId: c.id });
+                        }
+                    }
+                } catch (e) { }
+            }, 300);
+
+            res.json({ success: true, ...val });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     app.post('/new-conversation/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
@@ -997,8 +1248,8 @@ async function sendPushNotification(cascade) {
     if (pushSubscriptions.length === 0) return;
 
     const payload = JSON.stringify({
-        title: `💬 ${cascade.metadata.chatTitle}`,
-        body: 'AI has finished responding',
+        title: `⚡ SIGNAL :: ${cascade.metadata.chatTitle}`,
+        body: '「Neural link complete」— AI transmission received',
         cascadeId: cascade.id
     });
 

@@ -41,8 +41,8 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
     const data = e.data?.json() || {};
     e.waitUntil(
-        self.registration.showNotification(data.title || '💬 Shit-Chat', {
-            body: data.body || 'AI has finished responding',
+        self.registration.showNotification(data.title || '⚡ SIGNAL :: Shit-Chat', {
+            body: data.body || '「Neural link complete」— AI transmission received',
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',
             tag: data.cascadeId || 'default',
