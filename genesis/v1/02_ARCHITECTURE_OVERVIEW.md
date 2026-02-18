@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat — 架构概览
+# Antigravity Remote Dev — 架构概览
 
 > **版本**: v1 | **日期**: 2026-02-18
 

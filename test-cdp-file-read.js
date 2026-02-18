@@ -11,7 +11,7 @@
 import WebSocket from 'ws';
 
 const CDP_PORT = 9000;
-const TEST_FILE = process.argv[2] || '/Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/README.md';
+const TEST_FILE = process.argv[2] || '/Users/evan/Documents/seafile/Seafile/00_Dev/Github/antigravity-remote-dev/README.md';
 
 async function getTargets() {
     const resp = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);

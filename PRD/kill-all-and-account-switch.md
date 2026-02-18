@@ -3,7 +3,7 @@
 ## 功能一：一键关闭所有 Antigravity 程序
 
 ### 需求描述
-在 Shit-Chat 网页 header 栏增加关闭按钮，点击后关闭所有运行中的 Antigravity IDE 进程。
+在 Remote Dev 网页 header 栏增加关闭按钮，点击后关闭所有运行中的 Antigravity IDE 进程。
 
 ### 实现要点
 - `POST /api/kill-all` 接口：macOS 使用 `pkill`，Windows 使用 `taskkill`
@@ -27,4 +27,4 @@ Antigravity-Manager **没有外部 REST API** 用于账号切换。所有管理�
 - ❌ 无外部可编程 API
 
 ### 建议方案
-利用 Antigravity-Manager 已有的自动轮换机制，确保多账号已添加即可。如需手动操作，可在 Shit-Chat 中加入 Manager Web UI 跳转链接。
+利用 Antigravity-Manager 已有的自动轮换机制，确保多账号已添加即可。如需手动操作，可在 Remote Dev 中加入 Manager Web UI 跳转链接。

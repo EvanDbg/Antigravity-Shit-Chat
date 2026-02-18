@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat macOS 适配方案
+# Antigravity Remote Dev macOS 适配方案
 
 ## 概述
 
@@ -15,7 +15,7 @@
 
 ### 变更点 1：Antigravity 可执行文件路径（关键）
 
-**文件**: [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/server.js#L34-L35)
+**文件**: [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/server.js#L34-L35)
 
 **当前代码**:
 ```javascript
@@ -55,7 +55,7 @@ const ANTIGRAVITY_PATH = userConfig.antigravityPath || process.env.ANTIGRAVITY_P
 
 ### 变更点 2：spawn 进程启动参数
 
-**文件**: [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/server.js#L455-L459)
+**文件**: [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/server.js#L455-L459)
 
 **当前代码**:
 ```javascript
@@ -89,7 +89,7 @@ const child = spawn(ANTIGRAVITY_PATH, [`--remote-debugging-port=${port}`], spawn
 
 ### 变更点 3：config.example.json 和 README 文档更新
 
-**文件**: [config.example.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/config.example.json), [README.md](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/README.md)
+**文件**: [config.example.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/config.example.json), [README.md](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/README.md)
 
 **问题**:
 - `README.md` 中 `antigravityPath` 字段描述为 `Path to Antigravity.exe (empty = auto-detect)`，暗示 Windows

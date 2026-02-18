@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shitchat-v1';
+const CACHE_NAME = 'remotedev-v1';
 const STATIC_ASSETS = ['/', '/login.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 // Install: pre-cache static assets
@@ -41,7 +41,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
     const data = e.data?.json() || {};
     e.waitUntil(
-        self.registration.showNotification(data.title || '⚡ SIGNAL :: Shit-Chat', {
+        self.registration.showNotification(data.title || '⚡ SIGNAL :: Remote Dev', {
             body: data.body || '「Neural link complete」— AI transmission received',
             icon: '/icons/icon-192.png',
             badge: '/icons/icon-192.png',

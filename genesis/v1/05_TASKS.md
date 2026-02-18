@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat — 任务清单 (WBS)
+# Antigravity Remote Dev — 任务清单 (WBS)
 
 > **版本**: Genesis v1 | **日期**: 2026-02-18
 >

@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat Mobile Monitor v2.1
+# Antigravity Remote Dev Mobile Monitor v2.1
 
 Need to go to the bathroom? But Opus 4.5 might be done with that big task soon? Want to eat lunch? But there's more tokens left before they reset right after lunch?
 
@@ -98,7 +98,7 @@ Enter your password to log in.
 
 ## Problems?
 
-Problems setting up? Can't find an explanation? **Open the Shit-Chat folder in Antigravity and tell the agent what issues you are having**. It can read the code in one go.
+Problems setting up? Can't find an explanation? **Open the Remote Dev folder in Antigravity and tell the agent what issues you are having**. It can read the code in one go.
 
 ---
 

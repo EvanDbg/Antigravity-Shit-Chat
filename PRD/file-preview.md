@@ -2,7 +2,7 @@
 
 ## 背景
 
-Antigravity Shit-Chat 通过 CDP 镜像 IDE 聊天界面。当 AI 在对话中引用文件时（如 `server.js`、`README.md`），用户点击这些文件链接后，文件会在 IDE 中打开。但在网页端用户无法查看文件内容。
+Antigravity Remote Dev 通过 CDP 镜像 IDE 聊天界面。当 AI 在对话中引用文件时（如 `server.js`、`README.md`），用户点击这些文件链接后，文件会在 IDE 中打开。但在网页端用户无法查看文件内容。
 
 ## 需求
 

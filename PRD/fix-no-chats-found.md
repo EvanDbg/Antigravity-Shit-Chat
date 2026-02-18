@@ -2,7 +2,7 @@
 
 ## 背景
 
-Antigravity Shit-Chat 是一个通过 Chrome DevTools Protocol (CDP) 连接到 Antigravity IDE 的工具，用于在网页端监控和操作 IDE 中的聊天面板。
+Antigravity Remote Dev 是一个通过 Chrome DevTools Protocol (CDP) 连接到 Antigravity IDE 的工具，用于在网页端监控和操作 IDE 中的聊天面板。
 
 ## 问题描述
 

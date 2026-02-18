@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat 功能路线图
+# Antigravity Remote Dev 功能路线图
 
 基于现有代码分析和行业趋势，整理的优化和新增功能建议。
 

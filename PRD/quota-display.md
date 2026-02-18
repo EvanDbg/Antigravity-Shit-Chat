@@ -2,9 +2,9 @@
 
 ## 背景
 
-Antigravity IDE 安装了 [Quota Watcher](https://github.com/wusimpl/AntigravityQuotaWatcher) 插件，在状态栏实时显示各 AI 模型的配额剩余情况（如 `🟢 Claude: 100%`）。当前 Shit-Chat 网页端无法看到这些信息，用户需要切回 IDE 才能查看额度。
+Antigravity IDE 安装了 [Quota Watcher](https://github.com/wusimpl/AntigravityQuotaWatcher) 插件，在状态栏实时显示各 AI 模型的配额剩余情况（如 `🟢 Claude: 100%`）。当前 Remote Dev 网页端无法看到这些信息，用户需要切回 IDE 才能查看额度。
 
-**目标**：在 Shit-Chat 网页端实时显示配额信息，让用户随时了解模型使用情况。
+**目标**：在 Remote Dev 网页端实时显示配额信息，让用户随时了解模型使用情况。
 
 ---
 

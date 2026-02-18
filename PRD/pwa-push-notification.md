@@ -1,6 +1,6 @@
 # PWA 可安装 + Push 通知 实现方案
 
-为 Shit-Chat 添加 PWA 支持（一键安装到手机主屏）和 Web Push 通知（AI 回复完毕时推送提醒）。
+为 Remote Dev 添加 PWA 支持（一键安装到手机主屏）和 Web Push 通知（AI 回复完毕时推送提醒）。
 
 ## 架构总览
 
@@ -22,14 +22,14 @@ graph LR
 
 ---
 
-#### [NEW] [manifest.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/manifest.json)
+#### [NEW] [manifest.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/manifest.json)
 
 Web App Manifest 文件，定义应用名称、图标、主题色、启动方式：
 
 ```json
 {
-  "name": "Antigravity Shit-Chat",
-  "short_name": "Shit-Chat",
+  "name": "Antigravity Remote Dev",
+  "short_name": "Remote Dev",
   "description": "Monitor & interact with Antigravity AI chat sessions",
   "start_url": "/",
   "display": "standalone",
@@ -43,13 +43,13 @@ Web App Manifest 文件，定义应用名称、图标、主题色、启动方式
 }
 ```
 
-#### [NEW] [icons/](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/icons/)
+#### [NEW] [icons/](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/icons/)
 
 使用 `generate_image` 生成 192x192 和 512x512 的 App 图标。🚀 火箭元素 + 深色背景。
 
 ---
 
-#### [NEW] [sw.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/sw.js)
+#### [NEW] [sw.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/sw.js)
 
 Service Worker 负责两件事：
 1. **缓存静态资源** — 离线时显示壳页面
@@ -90,7 +90,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   const data = e.data?.json() || {};
   e.waitUntil(
-    self.registration.showNotification(data.title || '💬 Shit-Chat', {
+    self.registration.showNotification(data.title || '💬 Remote Dev', {
       body: data.body || 'AI has finished responding',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
@@ -116,7 +116,7 @@ self.addEventListener('notificationclick', (e) => {
 
 ---
 
-#### [MODIFY] [index.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/index.html)
+#### [MODIFY] [index.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/index.html)
 
 在 `<head>` 中添加 manifest 链接和 meta 标签：
 
@@ -137,7 +137,7 @@ if ('serviceWorker' in navigator) {
 }
 ```
 
-#### [MODIFY] [login.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/login.html)
+#### [MODIFY] [login.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/login.html)
 
 同样添加 manifest 链接（PWA 安装需要所有页面一致）。
 
@@ -147,7 +147,7 @@ if ('serviceWorker' in navigator) {
 
 ---
 
-#### [MODIFY] [package.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/package.json)
+#### [MODIFY] [package.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/package.json)
 
 添加 `web-push` 依赖：
 
@@ -162,7 +162,7 @@ if ('serviceWorker' in navigator) {
 
 ---
 
-#### [MODIFY] [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/server.js)
+#### [MODIFY] [server.js](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/server.js)
 
 **变更 1：导入 web-push + VAPID 配置**
 
@@ -284,7 +284,7 @@ async function sendPushNotification(cascade) {
 
 ---
 
-#### [MODIFY] [index.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/public/index.html)
+#### [MODIFY] [index.html](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/public/index.html)
 
 添加通知权限请求按钮和订阅逻辑：
 
@@ -356,7 +356,7 @@ function urlBase64ToUint8Array(base64String) {
 
 ---
 
-#### [MODIFY] [config.example.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Shit-Chat/config.example.json)
+#### [MODIFY] [config.example.json](file:///Users/evan/Documents/seafile/Seafile/00_Dev/Github/Antigravity-Remote Dev/config.example.json)
 
 添加 VAPID keys 注释说明（首次运行自动生成）：
 

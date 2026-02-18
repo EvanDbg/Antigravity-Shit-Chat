@@ -1,4 +1,4 @@
-# Antigravity Shit-Chat — 产品需求文档 (PRD)
+# Antigravity Remote Dev — 产品需求文档 (PRD)
 
 > **版本**: v2.1 | **日期**: 2026-02-18 | **状态**: 核心功能已完成
 
@@ -8,7 +8,7 @@
 
 ### 1.1 产品定位
 
-**Antigravity Shit-Chat** 是一个实时移动端监控工具，让用户可以在手机上查看和操作 Antigravity IDE 的聊天会话。解决"上厕所/吃饭时不想错过 AI 完成任务"的痛点。
+**Antigravity Remote Dev** 是一个实时移动端监控工具，让用户可以在手机上查看和操作 Antigravity IDE 的聊天会话。解决"上厕所/吃饭时不想错过 AI 完成任务"的痛点。
 
 ### 1.2 核心理念
 

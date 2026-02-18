@@ -2,7 +2,7 @@
 
 ## 背景
 
-Shit-Chat 应用需要防止未授权访问，同时在 Antigravity IDE 未运行时提供友好的用户体验，并允许用户直接从网页启动 IDE。
+Remote Dev 应用需要防止未授权访问，同时在 Antigravity IDE 未运行时提供友好的用户体验，并允许用户直接从网页启动 IDE。
 
 ## 功能
 

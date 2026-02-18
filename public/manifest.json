@@ -1,6 +1,6 @@
 {
-    "name": "Antigravity Shit-Chat",
-    "short_name": "Shit-Chat",
+    "name": "Antigravity Remote Dev",
+    "short_name": "Remote Dev",
     "description": "Monitor & interact with Antigravity AI chat sessions",
     "start_url": "/",
     "display": "standalone",

@@ -7,7 +7,7 @@
 
 ## 上下文
 
-Antigravity Shit-Chat 需要实现对 Antigravity IDE (Electron 应用) 的远程监控和交互，目标是在手机浏览器上实时查看聊天内容并进行操作。
+Antigravity Remote Dev 需要实现对 Antigravity IDE (Electron 应用) 的远程监控和交互，目标是在手机浏览器上实时查看聊天内容并进行操作。
 
 ## 决策
 

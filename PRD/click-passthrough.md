@@ -2,7 +2,7 @@
 
 ## 背景
 
-Antigravity Shit-Chat 应用通过 CDP 抓取 IDE cascade panel 的 HTML 快照并在网页端渲染显示。但是原来快照中的按钮和链接在网页端不可点击，用户无法与 IDE 中的交互元素进行操作。
+Antigravity Remote Dev 应用通过 CDP 抓取 IDE cascade panel 的 HTML 快照并在网页端渲染显示。但是原来快照中的按钮和链接在网页端不可点击，用户无法与 IDE 中的交互元素进行操作。
 
 ## 需求
 
