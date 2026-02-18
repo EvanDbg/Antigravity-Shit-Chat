@@ -1253,13 +1253,24 @@
             // The HTML is the outerHTML of #cascade/#conversation/#chat container
             // Get its children (the actual message elements)
             const container = temp.firstElementChild || temp;
-            return Array.from(container.children);
+            const children = Array.from(container.children);
+            console.log(`[CACHE] parseChunks: container=<${container.tagName}#${container.id}> children=${children.length}`);
+            children.forEach((ch, i) => {
+                const id = ch.id || '';
+                const cls = (ch.className||'').toString().substring(0, 60);
+                const tip = ch.querySelector('[data-tooltip-id]');
+                const tipVal = tip ? tip.getAttribute('data-tooltip-id') : null;
+                const textSnippet = (ch.textContent||'').trim().substring(0, 50);
+                console.log(`  [${i}] <${ch.tagName}> id="${id}" cls="${cls}" tip=${tipVal} text="${textSnippet}..." outerLen=${ch.outerHTML.length}`);
+            });
+            return children;
         }
 
         // Merge new chunks into cache, returns ordered array of all cached chunks
         function mergeIntoCache(cascadeId, newChunkEls) {
             const cache = getOrCreateCache(cascadeId);
             const seen = new Set();
+            let newCount = 0, updateCount = 0, unchangedCount = 0;
 
             newChunkEls.forEach((el, i) => {
                 const id = getChunkId(el, i);
@@ -1270,15 +1281,22 @@
                 if (!existing) {
                     // New chunk — assign order
                     cache.chunks.set(id, { html, order: cache.maxOrder++, hash: quickHash(html) });
+                    newCount++;
+                    console.log(`  [CACHE] NEW chunk id="${id}" order=${cache.maxOrder - 1} len=${html.length}`);
                 } else {
                     // Existing chunk — update content if changed (e.g., AI still generating)
                     const newHash = quickHash(html);
                     if (newHash !== existing.hash) {
                         existing.html = html;
                         existing.hash = newHash;
+                        updateCount++;
+                    } else {
+                        unchangedCount++;
                     }
                 }
             });
+
+            console.log(`[CACHE] merge: new=${newCount} updated=${updateCount} unchanged=${unchangedCount} totalCached=${cache.chunks.size}`);
 
             // Don't delete old chunks — they're cached history!
             // But cap at 800 chunks to prevent memory bloat
@@ -1296,8 +1314,9 @@
             const cache = contentCache[cascadeId];
             if (!cache || cache.chunks.size === 0) return null;
 
-            const sorted = [...cache.chunks.values()].sort((a, b) => a.order - b.order);
-            const inner = sorted.map(c => c.html).join('');
+            const sorted = [...cache.chunks.entries()].sort((a, b) => a[1].order - b[1].order);
+            console.log(`[CACHE] buildFromCache: ${sorted.length} chunks, orders: [${sorted.map(([k,v]) => v.order + ':' + k.substring(0,25)).join(', ')}]`);
+            const inner = sorted.map(([k, v]) => v.html).join('');
             // Wrap in the original container tag
             return `<${containerTag} id="chat-viewport">${inner}</${containerTag}>`;
         }
