@@ -9,7 +9,7 @@ import path from 'path';
 import { dirname, join } from 'path';
 import { spawn, exec, execSync } from 'child_process';
 import { createHmac, randomBytes } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import os from 'os';
 import webpush from 'web-push';
 
@@ -138,7 +138,7 @@ function checkPort(port) {
 function checkProcessRunning(name) {
     return new Promise((resolve) => {
         const cmd = process.platform === 'darwin'
-            ? `pgrep -f "${name}.app/Contents/MacOS/${name}"`
+            ? `pgrep -f "${name}.app/" || pgrep -x "${name}"`
             : `tasklist /FI "IMAGENAME eq ${name}.exe" /NH`;
         exec(cmd, (err, stdout) => {
             if (err) return resolve(false);
@@ -273,14 +273,22 @@ async function captureCSS(cdp) {
     const SCRIPT = `(async () => {
         // Gather CSS and namespace it to prevent leaks
         let css = '';
+        function namespaceRule(text) {
+            // Replace body/html/:root/:host selectors with #chat-viewport
+            text = text.replace(/(^|[\\s,}])body(?=[\\s,{:.])/gi, '$1#chat-viewport');
+            text = text.replace(/(^|[\\s,}])html(?=[\\s,{:.])/gi, '$1#chat-viewport');
+            text = text.replace(/(^|[\\s,}]):root(?=[\\s,{])/gi, '$1#chat-viewport');
+            text = text.replace(/(^|[\\s,}]):host(?=[\\s,{(])/gi, '$1#chat-viewport');
+            return text;
+        }
         for (const sheet of document.styleSheets) {
             try {
                 // Try direct access first (same-origin)
                 for (const rule of sheet.cssRules) {
                     let text = rule.cssText;
-                    text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#chat-viewport');
-                    text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#chat-viewport');
-                    css += text + '\\n';
+                    // Skip @font-face rules to reduce CSS size
+                    if (text.startsWith('@font-face')) continue;
+                    css += namespaceRule(text) + '\\n';
                 }
             } catch (e) {
                 // Cross-origin sheet — fetch it manually
@@ -289,9 +297,7 @@ async function captureCSS(cdp) {
                         const resp = await fetch(sheet.href);
                         if (resp.ok) {
                             let text = await resp.text();
-                            text = text.replace(/(^|[\\s,}])body(?=[\\s,{])/gi, '$1#chat-viewport');
-                            text = text.replace(/(^|[\\s,}])html(?=[\\s,{])/gi, '$1#chat-viewport');
-                            css += text + '\\n';
+                            css += namespaceRule(text) + '\\n';
                         }
                     } catch (fetchErr) { /* skip if fetch fails too */ }
                 }
@@ -312,6 +318,84 @@ async function captureCSS(cdp) {
         });
         return result.result?.value?.css || '';
     } catch (e) { return ''; }
+}
+
+// --- Capture Computed CSS Variables ---
+async function captureComputedVars(cdp) {
+    const SCRIPT = `(() => {
+        const cs = getComputedStyle(document.documentElement);
+        const vars = {};
+        // Extract key vscode CSS variables that control theming
+        const keys = [
+            '--vscode-editor-background', '--vscode-editor-foreground',
+            '--vscode-sideBar-background', '--vscode-panel-background',
+            '--vscode-input-background', '--vscode-input-foreground',
+            '--vscode-input-border', '--vscode-focusBorder',
+            '--vscode-button-background', '--vscode-button-foreground',
+            '--vscode-list-activeSelectionBackground', '--vscode-list-activeSelectionForeground',
+            '--vscode-list-hoverBackground', '--vscode-list-hoverForeground',
+            '--vscode-errorForeground', '--vscode-foreground',
+            '--vscode-descriptionForeground', '--vscode-textLink-foreground',
+            '--vscode-badge-background', '--vscode-badge-foreground',
+            '--vscode-checkbox-background', '--vscode-checkbox-border',
+            '--vscode-notifications-border', '--vscode-banner-background',
+            '--vscode-font-family', '--vscode-font-size', '--vscode-font-weight',
+            '--vscode-editor-font-family', '--vscode-editor-font-size',
+            // IDE-specific button & UI variables (set programmatically by Antigravity)
+            '--ide-button-background', '--ide-button-foreground', '--ide-button-color',
+            '--ide-button-hover-background', '--ide-button-secondary-background',
+            '--ide-button-secondary-hover-background', '--ide-button-secondary-color',
+            '--ide-chat-background', '--ide-editor-background',
+            '--ide-text-color', '--ide-link-color', '--ide-message-block-bot-color',
+            '--ide-task-section-background',
+        ];
+        for (const key of keys) {
+            const val = cs.getPropertyValue(key).trim();
+            if (val) vars[key] = val;
+        }
+        // Broad scan: capture ALL custom properties from stylesheets and inline styles
+        const allProps = new Set();
+        // From stylesheets (:root / :host rules)
+        Array.from(document.styleSheets).forEach(sheet => {
+            try {
+                Array.from(sheet.cssRules).forEach(r => {
+                    if (r.selectorText === ':root' || r.selectorText === ':host') {
+                        Array.from(r.style || []).filter(p => p.startsWith('--')).forEach(p => allProps.add(p));
+                    }
+                });
+            } catch(e) {}
+        });
+        // From document.documentElement inline style (programmatically set vars)
+        const rootStyle = document.documentElement.style;
+        for (let i = 0; i < rootStyle.length; i++) {
+            const prop = rootStyle[i];
+            if (prop.startsWith('--')) allProps.add(prop);
+        }
+        for (const prop of allProps) {
+            if (!vars[prop]) {
+                const val = cs.getPropertyValue(prop).trim();
+                if (val) vars[prop] = val;
+            }
+        }
+        // Capture body computed background & color as fallback
+        const bodyCom = getComputedStyle(document.body);
+        vars['__bodyBg'] = bodyCom.backgroundColor;
+        vars['__bodyColor'] = bodyCom.color;
+        vars['__bodyFontFamily'] = bodyCom.fontFamily;
+        return vars;
+    })()`;
+
+    const contextId = cdp.rootContextId;
+    if (!contextId) return {};
+
+    try {
+        const result = await cdp.call("Runtime.evaluate", {
+            expression: SCRIPT,
+            returnByValue: true,
+            contextId
+        });
+        return result.result?.value || {};
+    } catch (e) { return {}; }
 }
 
 // --- Quota Extraction ---
@@ -396,6 +480,18 @@ async function captureHTML(cdp) {
         });
 
         const clone = target.cloneNode(true);
+
+        // Fix overflow clipping: remove classes that clip content in web context
+        clone.querySelectorAll('[class]').forEach(el => {
+            const cls = el.className;
+            if (typeof cls === 'string' && (cls.includes('overflow-y-hidden') || cls.includes('overflow-x-clip') || cls.includes('overflow-hidden'))) {
+                el.className = cls
+                    .replace(/\boverflow-y-hidden\b/g, 'overflow-y-visible')
+                    .replace(/\boverflow-x-clip\b/g, '')
+                    .replace(/\boverflow-hidden\b/g, 'overflow-visible');
+            }
+        });
+
         // Tag clone elements with matching indexes
         const cloneClickables = Array.from(clone.querySelectorAll(clickSelector));
         // File extension pattern for detection
@@ -522,6 +618,7 @@ async function discover() {
                     },
                     snapshot: null,
                     css: await captureCSS(cdp),
+                    computedVars: await captureComputedVars(cdp),
                     cssHash: null,
                     cssRefreshCounter: 0,
                     snapshotHash: null,
@@ -615,10 +712,17 @@ async function updateSnapshots() {
             c.cssRefreshCounter = 0;
             try {
                 const newCss = await captureCSS(c.cdp);
+                const newVars = await captureComputedVars(c.cdp);
+                let changed = false;
                 if (newCss && newCss !== c.css) {
                     c.css = newCss;
-                    broadcast({ type: 'css_update', cascadeId: c.id });
+                    changed = true;
                 }
+                if (newVars && JSON.stringify(newVars) !== JSON.stringify(c.computedVars)) {
+                    c.computedVars = newVars;
+                    changed = true;
+                }
+                if (changed) broadcast({ type: 'css_update', cascadeId: c.id });
             } catch (e) { }
         }
     }));
@@ -762,7 +866,7 @@ async function main() {
 
             // 2. Kill OS processes
             const killCmd = process.platform === 'darwin'
-                ? 'pkill -f "Antigravity.app/Contents/MacOS/Antigravity" || true'
+                ? 'osascript -e \'quit app "Antigravity"\' 2>/dev/null; sleep 1; pkill -f "Antigravity.app/" 2>/dev/null || true'
                 : 'taskkill /IM Antigravity.exe /F 2>nul || echo done';
 
             await new Promise((resolve) => {
@@ -784,6 +888,229 @@ async function main() {
             });
         } catch (e) {
             console.error('Kill-all failed:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // --- Close Single Cascade ---
+    app.post('/api/close-cascade/:id', async (req, res) => {
+        const { id } = req.params;
+        const cascade = cascades.get(id);
+        if (!cascade) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            console.log(`🔴 Closing cascade: "${cascade.metadata.chatTitle}" (${id})`);
+
+            // Send window.close() via CDP to close the Electron window
+            try {
+                await cascade.cdp.call('Runtime.evaluate', {
+                    expression: 'window.close()',
+                    contextId: cascade.cdp.rootContextId
+                });
+            } catch (e) { /* window may already be closing */ }
+
+            // Close CDP WebSocket connection
+            try { cascade.cdp.ws.close(); } catch (e) { }
+
+            // Remove from cascades map
+            cascades.delete(id);
+            broadcastCascadeList();
+
+            console.log(`🔴 Cascade closed: ${id}`);
+            res.json({ success: true, closedId: id });
+        } catch (e) {
+            console.error('Close cascade failed:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // --- Project Browser APIs ---
+
+    // Get starting directory (parent of current workspace)
+    app.get('/api/workspace-root', (req, res) => {
+        try {
+            // Try to extract workspace path from connected cascades' windowTitle
+            for (const c of cascades.values()) {
+                const title = c.metadata.windowTitle || '';
+                // windowTitle format varies: "file.ext — ProjectName" or contains path info
+                // Try to find a path-like segment
+                const parts = title.split(' — ');
+                if (parts.length >= 2) {
+                    const projectName = parts[parts.length - 1].replace(/\s*\[.*\]\s*$/, '').trim();
+                    // Check common workspace locations
+                    const candidates = [
+                        join(os.homedir(), 'Documents', projectName),
+                        join(os.homedir(), 'Projects', projectName),
+                        join(os.homedir(), 'Desktop', projectName),
+                        join(os.homedir(), projectName),
+                    ];
+                    for (const candidate of candidates) {
+                        if (existsSync(candidate)) {
+                            const parent = path.dirname(candidate);
+                            return res.json({ root: parent, source: 'cascade', projectName });
+                        }
+                    }
+                }
+            }
+            // Fallback: home directory
+            res.json({ root: os.homedir(), source: 'fallback' });
+        } catch (e) {
+            res.json({ root: os.homedir(), source: 'error' });
+        }
+    });
+
+    // Browse directories
+    app.get('/api/browse', (req, res) => {
+        try {
+            const targetPath = path.resolve(req.query.path || os.homedir());
+
+            // Security: block sensitive system directories
+            const blocked = process.platform === 'darwin'
+                ? ['/System', '/private', '/sbin', '/usr/sbin']
+                : ['C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+            if (blocked.some(b => targetPath.startsWith(b))) {
+                return res.status(403).json({ error: 'Access to system directories is restricted' });
+            }
+
+            if (!existsSync(targetPath)) {
+                return res.status(404).json({ error: 'Directory not found' });
+            }
+
+            const entries = readdirSync(targetPath, { withFileTypes: true });
+            const folders = entries
+                .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(e => ({
+                    name: e.name,
+                    path: join(targetPath, e.name)
+                }));
+
+            const parentPath = path.dirname(targetPath);
+            res.json({
+                currentPath: targetPath,
+                parentPath: parentPath !== targetPath ? parentPath : null,
+                items: folders
+            });
+        } catch (e) {
+            if (e.code === 'EACCES' || e.code === 'EPERM') {
+                return res.status(403).json({ error: 'Permission denied' });
+            }
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Open a project folder in a new Antigravity window
+    app.post('/api/open-project', async (req, res) => {
+        const { folder } = req.body;
+        if (!folder) return res.status(400).json({ error: 'folder is required' });
+
+        if (!existsSync(folder)) {
+            return res.status(404).json({ error: 'Folder not found' });
+        }
+
+        try {
+            const alreadyRunning = await checkProcessRunning('Antigravity');
+            console.log(`📂 Open project: "${folder}" (Antigravity ${alreadyRunning ? 'running' : 'cold start'})`);
+
+            let child;
+            if (alreadyRunning) {
+                // Already running → open folder in a new window
+                // Strategy: try CLI tool first, then CDP, then `open -n -a` fallback
+                let opened = false;
+                let method = 'none';
+
+                // 1. Try the `antigravity` CLI tool (most reliable, like `code` for VS Code)
+                try {
+                    child = spawn('antigravity', [folder, '--new-window'], {
+                        detached: true, stdio: 'ignore',
+                        env: { ...process.env }
+                    });
+                    child.on('error', () => { }); // suppress
+                    child.unref();
+                    opened = true;
+                    method = 'cli';
+                    console.log(`✅ Opened via 'antigravity' CLI`);
+                } catch (e) {
+                    console.warn('⚠️ antigravity CLI failed:', e.message);
+                }
+
+                // 2. Fallback: CDP spawn from within Electron renderer
+                if (!opened && cascades.size > 0) {
+                    const anyCascade = cascades.values().next().value;
+                    const escapedFolder = JSON.stringify(folder);
+                    try {
+                        for (const ctx of (anyCascade.cdp.contexts || [])) {
+                            try {
+                                const r = await anyCascade.cdp.call('Runtime.evaluate', {
+                                    expression: `(() => {
+                                        try {
+                                            const cp = require('child_process');
+                                            cp.spawn('antigravity', [${escapedFolder}, '--new-window'], {
+                                                detached: true, stdio: 'ignore'
+                                            }).unref();
+                                            return { ok: true };
+                                        } catch(e) { return { ok: false, error: e.message }; }
+                                    })()`,
+                                    returnByValue: true,
+                                    contextId: ctx.id
+                                });
+                                if (r.result?.value?.ok) {
+                                    opened = true;
+                                    method = 'cdp';
+                                    console.log(`✅ CDP open-project succeeded via context ${ctx.id}`);
+                                    break;
+                                }
+                            } catch (e) { continue; }
+                        }
+                    } catch (e) {
+                        console.warn('⚠️ CDP open-project failed:', e.message);
+                    }
+                }
+
+                // 3. Last resort: macOS `open` with -n (force new instance)
+                if (!opened && process.platform === 'darwin') {
+                    try {
+                        child = spawn('open', ['-n', '-a', 'Antigravity', '--args', folder], {
+                            detached: true, stdio: 'ignore'
+                        });
+                        child.on('error', () => { });
+                        child.unref();
+                        opened = true;
+                        method = 'open-n';
+                        console.log(`✅ Opened via 'open -n -a Antigravity'`);
+                    } catch (e) {
+                        console.error('❌ All open methods failed:', e.message);
+                    }
+                }
+
+                return res.json({ success: opened, alreadyRunning: true, method });
+            } else {
+                // Cold start → use port 9000
+                const port = 9000;
+                if (process.platform === 'darwin') {
+                    child = spawn('open', ['-a', 'Antigravity', '--args', folder, `--remote-debugging-port=${port}`], {
+                        detached: true, stdio: 'ignore'
+                    });
+                } else {
+                    child = spawn(ANTIGRAVITY_PATH, [folder, `--remote-debugging-port=${port}`], {
+                        detached: true, stdio: 'ignore', windowsHide: false
+                    });
+                }
+                if (child) child.unref();
+
+                // Wait for port to open
+                let attempts = 15;
+                while (attempts-- > 0) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    if (await checkPort(port)) {
+                        console.log(`🔥 Antigravity port ${port} is now open!`);
+                        return res.json({ success: true, alreadyRunning: false, port });
+                    }
+                }
+                res.json({ success: false, error: 'TIMEOUT' });
+            }
+        } catch (e) {
+            console.error('Open project failed:', e.message);
             res.status(500).json({ error: e.message });
         }
     });
@@ -985,6 +1312,38 @@ async function main() {
         }
     });
 
+    // --- Close Active Tab API (sync file close from web UI to IDE) ---
+    app.post('/api/close-tab/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            // Use CDP Input.dispatchKeyEvent to send Ctrl/Cmd+W to close the active tab
+            const modifier = process.platform === 'darwin' ? 4 : 2; // 4=Meta(Cmd), 2=Ctrl
+
+            await c.cdp.call('Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                modifiers: modifier,
+                windowsVirtualKeyCode: 87, // W
+                key: 'w',
+                code: 'KeyW'
+            });
+            await c.cdp.call('Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                modifiers: modifier,
+                windowsVirtualKeyCode: 87,
+                key: 'w',
+                code: 'KeyW'
+            });
+
+            console.log(`📋 Close tab forwarded for "${c.metadata.chatTitle}"`);
+            res.json({ success: true });
+        } catch (e) {
+            console.error('Close tab error:', e.message);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // --- Push Notification Routes ---
     app.get('/api/push/vapid-key', (req, res) => {
         res.json({ publicKey: vapidKeys.publicKey });
@@ -1012,7 +1371,7 @@ async function main() {
     app.get('/styles/:id', (req, res) => {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Not found' });
-        res.json({ css: c.css || '' });
+        res.json({ css: c.css || '', computedVars: c.computedVars || {} });
     });
 
     // Alias for simple single-view clients (returns first active or first available)
@@ -1218,26 +1577,43 @@ async function injectMessage(cdp, text) {
             document.execCommand("insertText", false, text);
         }
         
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 200));
         
-        // Try multiple button selectors
-        const btn = document.querySelector('button[class*="arrow"]') || 
-                   document.querySelector('button[aria-label*="Send"]') ||
-                   document.querySelector('button[type="submit"]');
+        // Try to find the send button — multiple strategies for different Antigravity versions
+        // 1. Latest Antigravity: uses a div with data-tooltip-id containing "send"
+        const sendDiv = document.querySelector('[data-tooltip-id*="send"]:not([data-tooltip-id*="cancel"])');
+        // 2. Legacy Antigravity: button-based selectors
+        const sendBtn = document.querySelector('button[class*="arrow"]') || 
+                       document.querySelector('button[aria-label*="Send"]') ||
+                       document.querySelector('button[type="submit"]');
 
-        if (btn) {
-            btn.click();
+        if (sendDiv) {
+            sendDiv.click();
+            return { ok: true, method: "tooltip-div" };
+        } else if (sendBtn) {
+            sendBtn.click();
+            return { ok: true, method: "button" };
         } else {
-             // Fallback to Enter key
-             editor.dispatchEvent(new KeyboardEvent("keydown", { bubbles:true, key:"Enter" }));
+            // Fallback: dispatch Enter key with full event properties
+            const enterEvent = new KeyboardEvent("keydown", {
+                bubbles: true,
+                cancelable: true,
+                key: "Enter",
+                code: "Enter",
+                keyCode: 13,
+                which: 13,
+                composed: true
+            });
+            editor.dispatchEvent(enterEvent);
+            return { ok: true, method: "enter-key" };
         }
-        return { ok: true };
     })()`;
 
     try {
         const res = await cdp.call("Runtime.evaluate", {
             expression: SCRIPT,
             returnByValue: true,
+            awaitPromise: true,
             contextId: cdp.rootContextId
         });
         return res.result?.value || { ok: false };
