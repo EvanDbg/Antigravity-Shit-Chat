@@ -1509,13 +1509,6 @@
 
         document.getElementById('sendBtn').onclick = sendMessage;
 
-        document.getElementById('messageInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-
         // Click passthrough: intercept clicks on [data-cdp-click] elements
         chatContent.addEventListener('click', async (e) => {
             const clickable = e.target.closest('[data-cdp-click]');
