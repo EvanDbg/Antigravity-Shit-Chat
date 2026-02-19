@@ -1202,6 +1202,7 @@ async function main() {
 // Injection Helper (Moved down to keep main clear)
 async function injectMessage(cdp, text) {
     const SCRIPT = `(async () => {
+        const text = ${JSON.stringify(text)};
         // Try contenteditable first, then textarea
         const editor = document.querySelector('[contenteditable="true"]') || document.querySelector('textarea');
         if (!editor) return { ok: false, reason: "no editor found" };
@@ -1210,11 +1211,11 @@ async function injectMessage(cdp, text) {
         
         if (editor.tagName === 'TEXTAREA') {
             const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-            nativeTextAreaValueSetter.call(editor, "${text.replace(/"/g, '\\"')}");
+            nativeTextAreaValueSetter.call(editor, text);
             editor.dispatchEvent(new Event('input', { bubbles: true }));
         } else {
             document.execCommand("selectAll", false, null);
-            document.execCommand("insertText", false, "${text.replace(/"/g, '\\"')}");
+            document.execCommand("insertText", false, text);
         }
         
         await new Promise(r => setTimeout(r, 100));
