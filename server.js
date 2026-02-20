@@ -794,25 +794,28 @@ async function main() {
     app.post('/api/launch', async (req, res) => {
         try {
             const port = req.body.port || 9000;
-            const [portOpen, processRunning] = await Promise.all([
-                checkPort(port),
-                checkProcessRunning('Antigravity')
-            ]);
+            const portOpen = await checkPort(port);
 
-            console.log(`🔍 Status: process=${processRunning ? 'running' : 'stopped'}, port=${portOpen ? 'open' : 'closed'}`);
+            console.log(`🔍 Status: port=${portOpen ? 'open' : 'closed'}`);
 
-            // Case 1: Port already open → already connected, nothing to do
+            // Port already open → already connected, nothing to do
             if (portOpen) {
                 return res.json({ success: true, port, message: 'Already connected' });
             }
 
-            // Case 2: Process running but port closed → must restart with debug flags
+            // Port not open → kill any existing Antigravity, then launch fresh with debug port
+            const processRunning = await checkProcessRunning('Antigravity');
             if (processRunning) {
-                console.warn('⚠️ Antigravity is running but debug port is not open.');
-                return res.json({ success: false, error: 'RESTART_REQUIRED' });
+                console.log('🛑 Killing existing Antigravity (no debug port)...');
+                const killCmd = process.platform === 'darwin'
+                    ? 'osascript -e \'quit app "Antigravity"\' 2>/dev/null; sleep 1; pkill -f "Antigravity.app/" 2>/dev/null || true'
+                    : 'taskkill /IM Antigravity.exe /F 2>nul || echo done';
+                await new Promise((resolve) => {
+                    exec(killCmd, () => resolve());
+                });
+                await new Promise(r => setTimeout(r, 1500)); // Wait for process to fully exit
             }
 
-            // Case 3: Not running, not listening → fresh launch
             console.log(`🚀 Launching Antigravity on port ${port}...`);
 
             let child;
@@ -1318,7 +1321,30 @@ async function main() {
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
 
         try {
-            // Use CDP Input.dispatchKeyEvent to send Ctrl/Cmd+W to close the active tab
+            // Safety: check how many editor tabs are open before closing
+            // If 0 tabs, skip (nothing to close). Otherwise send Cmd+W.
+            const allContexts = c.cdp.contexts || [];
+            let tabCount = 0;
+            for (const ctx of allContexts) {
+                try {
+                    const r = await c.cdp.call('Runtime.evaluate', {
+                        expression: `document.querySelectorAll('.tab[data-resource-name]').length`,
+                        returnByValue: true,
+                        contextId: ctx.id
+                    });
+                    if (r.result?.value !== undefined && r.result.value > 0) {
+                        tabCount = r.result.value;
+                        break;
+                    }
+                } catch (e) { continue; }
+            }
+
+            if (tabCount === 0) {
+                console.log(`📋 Skip close-tab: no editor tabs open`);
+                return res.json({ success: false, skipped: true, reason: 'no tabs open' });
+            }
+
+            // Tabs exist — send Cmd+W / Ctrl+W to close the active one
             const modifier = process.platform === 'darwin' ? 4 : 2; // 4=Meta(Cmd), 2=Ctrl
 
             await c.cdp.call('Input.dispatchKeyEvent', {
@@ -1336,7 +1362,7 @@ async function main() {
                 code: 'KeyW'
             });
 
-            console.log(`📋 Close tab forwarded for "${c.metadata.chatTitle}"`);
+            console.log(`📋 Close tab forwarded for "${c.metadata.chatTitle}" (${tabCount} tabs open)`);
             res.json({ success: true });
         } catch (e) {
             console.error('Close tab error:', e.message);

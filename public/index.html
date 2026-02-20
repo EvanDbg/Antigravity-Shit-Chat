@@ -77,6 +77,28 @@
             background: #4ade80;
         }
 
+        .cascade-tab .close-btn {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: #888;
+            font-size: 12px;
+            line-height: 16px;
+            text-align: center;
+            cursor: pointer;
+            margin-left: 4px;
+            padding: 0;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .cascade-tab .close-btn:hover {
+            background: #f87171;
+            color: #fff;
+        }
+
         /* Green if optimized/active window */
 
         .chat-container {
@@ -700,6 +722,184 @@
             border-color: #3b82f6;
         }
 
+        /* Project Browser Modal */
+        .project-browser-box {
+            max-width: 600px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.1), 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .project-browser-box .modal-header {
+            border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+        }
+
+        .project-browser-box .modal-header h2 {
+            font-family: 'Courier New', monospace;
+            color: #0ff;
+            text-shadow: 0 0 8px rgba(0, 255, 255, 0.4);
+            letter-spacing: 1px;
+        }
+
+        .project-breadcrumb {
+            padding: 10px 16px;
+            background: rgba(0, 20, 30, 0.6);
+            border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #888;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            overflow: hidden;
+        }
+
+        .project-breadcrumb .bc-segment {
+            color: rgba(0, 255, 255, 0.6);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .project-breadcrumb .bc-segment:hover {
+            color: #0ff;
+            text-shadow: 0 0 6px rgba(0, 255, 255, 0.5);
+        }
+
+        .project-breadcrumb .bc-sep {
+            color: #444;
+            margin: 0 2px;
+        }
+
+        .project-breadcrumb .bc-current {
+            color: #0ff;
+            font-weight: 700;
+        }
+
+        .project-folder-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            margin: 4px 0;
+            background: rgba(0, 20, 30, 0.4);
+            border: 1px solid rgba(0, 255, 255, 0.08);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .project-folder-item:hover {
+            background: rgba(0, 255, 255, 0.05);
+            border-color: rgba(0, 255, 255, 0.4);
+            color: #0ff;
+            text-shadow: 0 0 4px rgba(0, 255, 255, 0.3);
+        }
+
+        .project-folder-item .folder-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .project-folder-item .folder-name {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .project-folder-item .folder-arrow {
+            color: #555;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .project-folder-item:hover .folder-arrow {
+            color: #0ff;
+        }
+
+        .project-empty {
+            text-align: center;
+            color: #555;
+            padding: 30px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .project-error {
+            text-align: center;
+            color: #f87171;
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .project-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 12px 16px;
+            border-top: 1px solid rgba(0, 255, 255, 0.15);
+            background: rgba(0, 10, 20, 0.5);
+            border-radius: 0 0 12px 12px;
+        }
+
+        .project-cancel-btn {
+            padding: 8px 20px;
+            background: transparent;
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: #888;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Courier New', monospace;
+        }
+
+        .project-cancel-btn:hover {
+            border-color: #666;
+            color: #ccc;
+        }
+
+        .project-open-btn {
+            padding: 8px 24px;
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.2), rgba(255, 0, 255, 0.15));
+            border: 1px solid rgba(0, 255, 255, 0.4);
+            border-radius: 6px;
+            color: #0ff;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'Courier New', monospace;
+            letter-spacing: 0.5px;
+            text-shadow: 0 0 8px rgba(0, 255, 255, 0.4);
+        }
+
+        .project-open-btn:hover {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.3), rgba(255, 0, 255, 0.25));
+            border-color: #0ff;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+        }
+
+        .project-open-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .project-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: rgba(0, 255, 255, 0.5);
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
         .modal-error {
             color: #f87171;
             text-align: center;
@@ -1156,6 +1356,7 @@
         </div>
         <div class="new-conv-btn" id="newConvBtn" title="New Conversation">＋</div>
         <div class="notif-btn" id="notifBtn" title="Toggle notifications" onclick="toggleNotifications()">🔕</div>
+        <div class="new-conv-btn" id="browseBtn" title="Open Project" onclick="openProjectBrowser()">📂</div>
         <div class="kill-btn" id="killBtn" title="Kill all Antigravity" onclick="killAllAntigravity()">⏻</div>
         <div class="acct-btn" id="acctBtn" title="Account Manager" onclick="openAccountModal()">👤</div>
     </div>
@@ -1202,6 +1403,25 @@
         </div>
         <div class="file-preview-body" id="filePreviewBody">
             <div class="file-preview-loading">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Project Browser Modal -->
+    <div class="modal-overlay" id="projectModal" onclick="if(event.target===this)closeProjectBrowser()">
+        <div class="modal-box project-browser-box">
+            <div class="modal-header">
+                <h2>⚡ OPEN_PROJECT</h2>
+                <button class="modal-close" onclick="closeProjectBrowser()">✕</button>
+            </div>
+            <div class="project-breadcrumb" id="projectBreadcrumb"></div>
+            <div class="modal-body" id="projectList">
+                <div class="project-loading">⏳ Initializing...</div>
+            </div>
+            <div class="project-actions">
+                <button class="project-cancel-btn" onclick="closeProjectBrowser()">CANCEL</button>
+                <button class="project-open-btn" id="projectOpenBtn" onclick="openSelectedProject()">⚡
+                    OPEN_HERE</button>
+            </div>
         </div>
     </div>
 
@@ -1369,6 +1589,7 @@
                      onclick="selectCascade('${c.id}')">
                     <div class="status"></div>
                     ${c.title || 'Untitled'}
+                    <button class="close-btn" onclick="event.stopPropagation(); closeCascade('${c.id}')" title="Close">×</button>
                 </div>
             `).join('');
 
@@ -1400,15 +1621,54 @@
                 const styleRes = await fetch(`/styles/${id}`);
                 if (styleRes.ok) {
                     const styleData = await styleRes.json();
+                    const vars = styleData.computedVars || {};
+
+                    // Build CSS variable declarations from IDE's computed values
+                    let varDecls = '';
+                    for (const [key, val] of Object.entries(vars)) {
+                        if (!key.startsWith('__')) {
+                            varDecls += `${key}: ${val};\n`;
+                        }
+                    }
+
+                    // Use IDE's body colors, with dark-theme fallbacks
+                    const bodyBg = vars['__bodyBg'] || vars['--vscode-editor-background'] || '#1e1e1e';
+                    const bodyColor = vars['__bodyColor'] || vars['--vscode-editor-foreground'] || '#e5e7eb';
+                    const editorBg = vars['--vscode-editor-background'] || '#1e1e1e';
+                    const editorFg = vars['--vscode-editor-foreground'] || '#e5e7eb';
+
                     document.getElementById('cascade-style').textContent = `
-                        ${styleData.css}
-                        /* Fallback: ensure text is ALWAYS visible regardless of captured CSS */
+                        /* Inject IDE's computed CSS variables */
                         #chat-viewport {
-                            color: #e5e7eb !important;
-                            background: transparent !important;
+                            ${varDecls}
+                            color-scheme: dark;
+                        }
+
+                        /* Captured IDE CSS */
+                        ${styleData.css}
+
+                        /* Ensure viewport matches IDE appearance */
+                        #chat-viewport {
+                            color: ${editorFg} !important;
+                            background: ${editorBg} !important;
                             font-size: 14px;
                             line-height: 1.6;
                         }
+
+                        /* Fix overflow: prevent content clipping in web context */
+                        #chat-viewport #conversation,
+                        #chat-viewport #cascade,
+                        #chat-viewport #chat {
+                            overflow-y: visible !important;
+                            overflow-x: visible !important;
+                            height: auto !important;
+                            max-height: none !important;
+                        }
+                        #chat-viewport .overflow-y-hidden { overflow-y: visible !important; }
+                        #chat-viewport .overflow-hidden { overflow: visible !important; }
+                        #chat-viewport .overflow-x-clip { overflow-x: visible !important; }
+
+                        /* Text color inheritance */
                         #chat-viewport p, #chat-viewport span, #chat-viewport div,
                         #chat-viewport li, #chat-viewport td, #chat-viewport th,
                         #chat-viewport h1, #chat-viewport h2, #chat-viewport h3,
@@ -1416,16 +1676,20 @@
                         #chat-viewport label, #chat-viewport a {
                             color: inherit;
                         }
+
                         /* Support both legacy #cascade and new #conversation/#chat */
-                        #cascade, #conversation, #chat { 
-                            background: transparent !important; 
-                            color: #e5e7eb !important; 
+                        #cascade, #conversation, #chat {
+                            background: transparent !important;
+                            color: ${editorFg} !important;
                         }
-                        #cascade .prose, #conversation .prose, #chat-viewport .prose {
-                            --tw-prose-body: #e5e7eb !important;
+
+                        /* Prose typography variables */
+                        #cascade .prose, #conversation .prose, #chat-viewport .prose,
+                        #chat-viewport [class*="prose"] {
+                            --tw-prose-body: ${editorFg} !important;
                             --tw-prose-headings: #f3f4f6 !important;
-                            --tw-prose-lead: #e5e7eb !important;
-                            --tw-prose-links: #60a5fa !important;
+                            --tw-prose-lead: ${editorFg} !important;
+                            --tw-prose-links: ${vars['--vscode-textLink-foreground'] || '#60a5fa'} !important;
                             --tw-prose-bold: #f3f4f6 !important;
                             --tw-prose-counters: #9ca3af !important;
                             --tw-prose-bullets: #d1d5db !important;
@@ -1438,11 +1702,68 @@
                             --tw-prose-pre-bg: #1f2937 !important;
                             --tw-prose-th-borders: #374151 !important;
                             --tw-prose-td-borders: #374151 !important;
-                            color: #e5e7eb !important;
+                            color: ${editorFg} !important;
                         }
+
                         /* Ensure code blocks are readable */
-                        pre, code { background: #111 !important; color: #ddd !important; }
+                        #chat-viewport pre, #chat-viewport code {
+                            background: #111 !important;
+                            color: #ddd !important;
+                        }
+                        #chat-viewport pre code {
+                            background: transparent !important;
+                        }
+
+                        /* Tailwind Preflight: reset button/form elements (scoped to viewport) */
+                        #chat-viewport button,
+                        #chat-viewport [type='button'],
+                        #chat-viewport [type='reset'],
+                        #chat-viewport [type='submit'] {
+                            -webkit-appearance: button;
+                            appearance: button;
+                            background-color: transparent;
+                            background-image: none;
+                            border: none;
+                            color: inherit;
+                            font: inherit;
+                            margin: 0;
+                            padding: 0;
+                            cursor: pointer;
+                        }
+                        #chat-viewport input,
+                        #chat-viewport select,
+                        #chat-viewport textarea {
+                            border: none;
+                            background: transparent;
+                            color: inherit;
+                            font: inherit;
+                            padding: 0;
+                            margin: 0;
+                        }
+
+                        /* Fallback values for --ide-* variables if not captured from IDE */
+                        #chat-viewport {
+                            --ide-button-background: ${vars['--ide-button-background'] || vars['--vscode-button-background'] || '#0078d4'};
+                            --ide-button-color: ${vars['--ide-button-color'] || vars['--vscode-button-foreground'] || '#ffffff'};
+                            --ide-button-hover-background: ${vars['--ide-button-hover-background'] || '#1a85d6'};
+                            --ide-button-secondary-background: ${vars['--ide-button-secondary-background'] || 'transparent'};
+                            --ide-button-secondary-hover-background: ${vars['--ide-button-secondary-hover-background'] || 'rgba(255,255,255,0.1)'};
+                            --ide-button-secondary-color: ${vars['--ide-button-secondary-color'] || editorFg};
+                            --ide-chat-background: ${vars['--ide-chat-background'] || editorBg};
+                            --ide-editor-background: ${vars['--ide-editor-background'] || editorBg};
+                            --ide-text-color: ${vars['--ide-text-color'] || editorFg};
+                            --ide-link-color: ${vars['--ide-link-color'] || vars['--vscode-textLink-foreground'] || '#60a5fa'};
+                            --ide-message-block-bot-color: ${vars['--ide-message-block-bot-color'] || editorFg};
+                            --ide-task-section-background: ${vars['--ide-task-section-background'] || editorBg};
+                        }
+
+                        /* Fix height constraints that prevent content display */
+                        #chat-viewport .h-full { height: auto !important; }
+                        #chat-viewport .min-h-0 { min-height: auto !important; }
                     `;
+
+                    // Apply body background to our page
+                    document.body.style.backgroundColor = editorBg;
                 }
             } catch (e) { console.error('CSS refresh failed:', e); }
         }
@@ -1466,7 +1787,10 @@
                 // Preserve Scroll
                 const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 50;
 
-                document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
+                // Body bg is now primarily set by applyCascadeStyles from CSS vars
+                if (!document.body.style.backgroundColor || document.body.style.backgroundColor === '') {
+                    document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
+                }
                 // Wrap content in a viewport container for CSS scoping
                 chatContent.innerHTML = `<div id="chat-viewport">${data.html}</div>`;
 
@@ -1518,14 +1842,29 @@
             e.stopPropagation();
 
             const idx = clickable.getAttribute('data-cdp-click');
+            const hasFileName = clickable.hasAttribute('data-file-name');
             clickable.classList.add('cdp-clicking');
 
             try {
-                // Step 1: Record current tab BEFORE click
-                const beforeRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
-                const beforeTab = await beforeRes.json();
+                // Step 1: 统一关闭当前 Editor 标签（后端判断 tab > 0 才关）
+                try {
+                    const closeRes = await fetch(`/api/close-tab/${currentCascadeId}`, { method: 'POST' });
+                    const closeData = await closeRes.json();
+                    if (closeData.success) {
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                } catch (e) {
+                    console.warn('Pre-close tab failed:', e);
+                }
 
-                // Step 2: Execute the click
+                // Step 1.5: Record current tab (for non-file elements tab-change fallback)
+                let beforeTab = null;
+                if (!hasFileName) {
+                    const beforeRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                    beforeTab = await beforeRes.json();
+                }
+
+                // Step 2: Execute the click via CDP
                 const res = await fetch(`/click/${currentCascadeId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1537,15 +1876,18 @@
                 // Step 3: Wait for editor to respond
                 await new Promise(r => setTimeout(r, 500));
 
-                // Step 4: Check if tab changed → a file/artifact was opened
-                const afterRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
-                const afterTab = await afterRes.json();
-
-                if (afterTab.name && afterTab.name !== beforeTab.name) {
-                    // Tab changed — a new file/artifact opened, show preview
+                // Step 4: Decide whether to show file preview
+                if (hasFileName) {
+                    // Known file/artifact link → always show preview
                     openFilePreview();
+                } else {
+                    // Other elements → use tab-change heuristic as fallback
+                    const afterRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                    const afterTab = await afterRes.json();
+                    if (afterTab.name && afterTab.name !== beforeTab?.name) {
+                        openFilePreview();
+                    }
                 }
-                // If tab didn't change, it was an expand/collapse or action button — no preview
             } catch (err) {
                 console.error('Click passthrough error:', err);
             } finally {
@@ -1668,8 +2010,16 @@
             return div.innerHTML;
         }
 
-        function closeFilePreview() {
+        async function closeFilePreview() {
             document.getElementById('filePreviewModal').classList.remove('active');
+            // Sync: close the corresponding tab in IDE editor
+            if (currentCascadeId) {
+                try {
+                    await fetch(`/api/close-tab/${currentCascadeId}`, { method: 'POST' });
+                } catch (e) {
+                    console.error('Close tab sync error:', e);
+                }
+            }
         }
         window.closeFilePreview = closeFilePreview;
 
@@ -1889,6 +2239,22 @@
                 btn.style.pointerEvents = '';
             }, 2000);
         }
+
+        // --- Close Single Cascade ---
+        async function closeCascade(id) {
+            if (!confirm('Close this Antigravity window?')) return;
+            try {
+                const res = await fetch(`/api/close-cascade/${id}`, { method: 'POST' });
+                if (res.status === 401) {
+                    window.location.href = '/login.html';
+                    return;
+                }
+                const data = await res.json();
+                if (!data.success) console.warn('Close cascade failed:', data.error);
+            } catch (e) {
+                console.error('Close cascade error:', e);
+            }
+        }
         window.killAllAntigravity = killAllAntigravity;
 
         // --- Account Manager Modal ---
@@ -2003,6 +2369,150 @@
             }
         }
         window.switchAccount = switchAccount;
+
+        // --- Project Browser ---
+        let currentBrowsePath = null;
+
+        async function openProjectBrowser() {
+            document.getElementById('projectModal').classList.add('active');
+            document.getElementById('projectList').innerHTML = '<div class="project-loading">⏳ Scanning directories...</div>';
+            try {
+                const res = await fetch('/api/workspace-root');
+                if (res.status === 401) { window.location.href = '/login.html'; return; }
+                const data = await res.json();
+                browseTo(data.root);
+            } catch (e) {
+                browseTo(null); // will fallback on server side
+            }
+        }
+        window.openProjectBrowser = openProjectBrowser;
+
+        function closeProjectBrowser() {
+            document.getElementById('projectModal').classList.remove('active');
+        }
+        window.closeProjectBrowser = closeProjectBrowser;
+
+        async function browseTo(dirPath) {
+            const listEl = document.getElementById('projectList');
+            const breadcrumbEl = document.getElementById('projectBreadcrumb');
+            listEl.innerHTML = '<div class="project-loading">⏳ Loading...</div>';
+
+            try {
+                const url = dirPath ? `/api/browse?path=${encodeURIComponent(dirPath)}` : '/api/browse';
+                const res = await fetch(url);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+                    listEl.innerHTML = `<div class="project-error">⚠ ${err.error || 'Failed to load'}</div>`;
+                    return;
+                }
+                const data = await res.json();
+                currentBrowsePath = data.currentPath;
+
+                // Render breadcrumb
+                const sep = data.currentPath.includes('\\') ? '\\' : '/';
+                const parts = data.currentPath.split(sep).filter(p => p);
+                let bcHtml = '';
+                // Root
+                if (sep === '/') {
+                    bcHtml += `<span class="bc-segment" onclick="browseTo('/')">/</span>`;
+                } else {
+                    bcHtml += `<span class="bc-segment" onclick="browseTo('${parts[0]}\\\\')">${parts[0]}\\</span>`;
+                    parts.shift();
+                }
+                for (let i = 0; i < parts.length; i++) {
+                    const isLast = i === parts.length - 1;
+                    const partPath = sep === '/'
+                        ? '/' + parts.slice(0, i + 1).join('/')
+                        : parts[0] + '\\' + parts.slice(1, i + 1).join('\\');
+                    // Reconstruct the actual path for clicking
+                    const clickPath = data.currentPath.split(sep).slice(0, (sep === '/' ? 1 : 0) + i + 1 + (sep === '/' ? 0 : 1)).join(sep) || sep;
+                    if (isLast) {
+                        bcHtml += `<span class="bc-current">${parts[i]}</span>`;
+                    } else {
+                        bcHtml += `<span class="bc-segment" onclick="browseTo('${data.currentPath.split(sep).slice(0, (sep === '/' ? 0 : 0) + i + 2).join(sep)}')">${parts[i]}</span>`;
+                        bcHtml += `<span class="bc-sep">${sep}</span>`;
+                    }
+                }
+                breadcrumbEl.innerHTML = bcHtml;
+
+                // Render folder list
+                let html = '';
+
+                // Parent directory link
+                if (data.parentPath) {
+                    html += `<div class="project-folder-item" onclick="browseTo('${data.parentPath.replace(/\\/g, '\\\\')}')">
+                        <span class="folder-icon">⬆</span>
+                        <span class="folder-name">..</span>
+                        <span class="folder-arrow">‹</span>
+                    </div>`;
+                }
+
+                if (data.items.length === 0 && !data.parentPath) {
+                    html += '<div class="project-empty">// NO_SUBDIRECTORIES_FOUND</div>';
+                } else if (data.items.length === 0) {
+                    html += '<div class="project-empty">// EMPTY_DIRECTORY</div>';
+                }
+
+                for (const item of data.items) {
+                    const escapedPath = item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                    html += `<div class="project-folder-item" onclick="browseTo('${escapedPath}')">
+                        <span class="folder-icon">📁</span>
+                        <span class="folder-name">${item.name}</span>
+                        <span class="folder-arrow">›</span>
+                    </div>`;
+                }
+
+                listEl.innerHTML = html;
+            } catch (e) {
+                listEl.innerHTML = `<div class="project-error">⚠ ${e.message}</div>`;
+            }
+        }
+        window.browseTo = browseTo;
+
+        async function openSelectedProject() {
+            if (!currentBrowsePath) return;
+            const btn = document.getElementById('projectOpenBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ LAUNCHING...';
+
+            try {
+                const res = await fetch('/api/open-project', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder: currentBrowsePath })
+                });
+                if (res.status === 401) { window.location.href = '/login.html'; return; }
+                const data = await res.json();
+
+                if (data.success) {
+                    btn.textContent = '✅ LAUNCHED!';
+                    btn.style.borderColor = '#4ade80';
+                    btn.style.color = '#4ade80';
+                    // Close modal after short delay
+                    setTimeout(() => {
+                        closeProjectBrowser();
+                        btn.textContent = '⚡ OPEN_HERE';
+                        btn.style.borderColor = '';
+                        btn.style.color = '';
+                        btn.disabled = false;
+                    }, 1500);
+                } else {
+                    btn.textContent = data.error === 'TIMEOUT' ? '⏰ TIMEOUT' : '❌ FAILED';
+                    setTimeout(() => {
+                        btn.textContent = '⚡ OPEN_HERE';
+                        btn.disabled = false;
+                    }, 2000);
+                }
+            } catch (e) {
+                console.error('Open project error:', e);
+                btn.textContent = '❌ ERROR';
+                setTimeout(() => {
+                    btn.textContent = '⚡ OPEN_HERE';
+                    btn.disabled = false;
+                }, 2000);
+            }
+        }
+        window.openSelectedProject = openSelectedProject;
 
         connect();
     </script>
