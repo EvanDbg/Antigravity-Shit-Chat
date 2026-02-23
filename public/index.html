@@ -144,8 +144,9 @@
             padding: 10px 14px;
             border-radius: 4px;
             resize: none;
-            height: 42px;
-            max-height: 120px;
+            min-height: 42px;
+            max-height: 50vh;
+            overflow-y: auto;
             font-family: 'Courier New', monospace;
             font-size: 13px;
             letter-spacing: 0.3px;
@@ -1816,6 +1817,7 @@
 
             // Clear immediately to feel responsive
             input.value = '';
+            input.style.height = 'auto';
 
             try {
                 await fetch(`/send/${currentCascadeId}`, {
@@ -1827,11 +1829,22 @@
             } catch (e) {
                 console.error("Send failed", e);
                 input.value = text; // Restore on fail
+                input.style.height = 'auto';
+                input.style.height = input.scrollHeight + 'px';
                 alert("Failed to send message: " + e.message);
             }
         }
 
         document.getElementById('sendBtn').onclick = sendMessage;
+
+        // Textarea auto-resize: dynamically adjust height based on content
+        (function () {
+            const ta = document.getElementById('messageInput');
+            ta.addEventListener('input', () => {
+                ta.style.height = 'auto';
+                ta.style.height = ta.scrollHeight + 'px';
+            });
+        })();
 
         // Click passthrough: intercept clicks on [data-cdp-click] elements
         chatContent.addEventListener('click', async (e) => {

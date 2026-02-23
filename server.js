@@ -1241,7 +1241,12 @@ async function main() {
                             const iconLabel = tab.querySelector('.monaco-icon-label');
                             const ariaLabel = iconLabel?.getAttribute('aria-label') || '';
                             const labelDesc = tab.querySelector('.label-description')?.textContent?.trim() || '';
-                            return { name, ariaLabel, labelDesc };
+                            // title attribute often contains the full absolute path
+                            const tabTitle = tab.getAttribute('title') || '';
+                            const iconTitle = iconLabel?.getAttribute('title') || '';
+                            // Also check the label-name element
+                            const labelName = tab.querySelector('.label-name')?.getAttribute('title') || '';
+                            return { name, ariaLabel, labelDesc, tabTitle, iconTitle, labelName };
                         })()`,
                         returnByValue: true,
                         contextId: ctx.id
@@ -1283,9 +1288,100 @@ async function main() {
                 });
             }
 
-            // Step 3: Normal file — extract path from aria-label
-            // Format: "~/path/to/file.js • Modified" or just "~/path/to/file.js"
-            let filePath = tabInfo.ariaLabel.replace(/\s•\s.*$/, '').trim();
+            // Step 3: Normal file — resolve full path and read content
+            console.log(`🔍 [file-preview] Raw tabInfo:`, JSON.stringify(tabInfo));
+
+            // Clean up ariaLabel
+            let filePath = (tabInfo.ariaLabel || '')
+                .replace(/\s•\s.*$/, '')           // strip " • Modified/Untracked" etc.
+                .replace(/\s*\(preview[^)]*\)/, '') // strip "(preview ◎)"
+                .trim();
+
+            console.log(`🔍 [file-preview] ariaLabel path: "${filePath}"`);
+
+            // If ariaLabel only has filename (no path separator), try hover tooltip
+            if (filePath && !filePath.includes('/') && !filePath.includes('~')) {
+                console.log(`🔍 [file-preview] ariaLabel has no path, trying hover tooltip...`);
+                try {
+                    // Step A: Dismiss all existing hover widgets first
+                    await c.cdp.call('Runtime.evaluate', {
+                        expression: `(() => {
+                            document.querySelectorAll('.monaco-hover, .workbench-hover').forEach(h => {
+                                h.style.display = 'none';
+                            });
+                        })()`,
+                        contextId: mainContextId
+                    });
+                    // Move mouse to neutral position to clear hovers
+                    await c.cdp.call('Input.dispatchMouseEvent', {
+                        type: 'mouseMoved', x: 0, y: 0
+                    });
+                    await new Promise(r => setTimeout(r, 300));
+
+                    // Step B: Get tab position and hover on it
+                    const posResult = await c.cdp.call('Runtime.evaluate', {
+                        expression: `(() => {
+                            const tab = document.querySelector('.tab.active.selected[data-resource-name]');
+                            if (!tab) return null;
+                            const rect = tab.getBoundingClientRect();
+                            return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+                        })()`,
+                        returnByValue: true,
+                        contextId: mainContextId
+                    });
+                    const pos = posResult.result?.value;
+                    if (pos) {
+                        await c.cdp.call('Input.dispatchMouseEvent', {
+                            type: 'mouseMoved', x: pos.x, y: pos.y
+                        });
+                        // Wait for tab tooltip to appear
+                        await new Promise(r => setTimeout(r, 1000));
+
+                        // Step C: Find the VISIBLE tooltip that contains a path
+                        const tooltipResult = await c.cdp.call('Runtime.evaluate', {
+                            expression: `(() => {
+                                // Look for all hover containers, find one with a path-like string
+                                const hovers = document.querySelectorAll(
+                                    '.workbench-hover-container, .monaco-hover'
+                                );
+                                for (const h of hovers) {
+                                    const style = getComputedStyle(h);
+                                    if (style.display === 'none' || style.visibility === 'hidden') continue;
+                                    const text = h.textContent?.trim() || '';
+                                    // Tab tooltip contains ~ or / path, filter out code hovers
+                                    if (text.includes('/') || text.startsWith('~')) {
+                                        return text;
+                                    }
+                                }
+                                return null;
+                            })()`,
+                            returnByValue: true,
+                            contextId: mainContextId
+                        });
+                        const tooltipText = tooltipResult.result?.value;
+                        if (tooltipText) {
+                            const cleanedTooltip = tooltipText
+                                .replace(/\s•\s.*$/, '')
+                                .replace(/\s*\(preview[^)]*\)/, '')
+                                .trim();
+                            console.log(`🔍 [file-preview] Tooltip path: "${cleanedTooltip}"`);
+                            if (cleanedTooltip.includes('/') || cleanedTooltip.startsWith('~')) {
+                                filePath = cleanedTooltip;
+                            }
+                        } else {
+                            console.log(`🔍 [file-preview] No path-like tooltip found`);
+                        }
+
+                        // Step D: Dismiss tooltip
+                        await c.cdp.call('Input.dispatchMouseEvent', {
+                            type: 'mouseMoved', x: 0, y: 0
+                        });
+                    }
+                } catch (e) {
+                    console.log(`🔍 [file-preview] Hover tooltip failed:`, e.message);
+                }
+            }
+
             if (!filePath) {
                 return res.status(404).json({ error: 'No file path in active tab' });
             }
@@ -1294,7 +1390,7 @@ async function main() {
                 filePath = filePath.replace('~', os.homedir());
             }
 
-            console.log(`📂 Active file: "${filePath}" (tab: ${tabInfo.name})`);
+            console.log(`📂 [file-preview] Resolved path: "${filePath}"`);
 
             try {
                 const stat = statSync(filePath);
@@ -1306,7 +1402,8 @@ async function main() {
                 const filename = path.basename(filePath);
                 res.json({ type: 'file', content, filename, ext, path: filePath });
             } catch (e) {
-                if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+                console.error(`❌ [file-preview] Read failed: ${e.code} — "${filePath}"`);
+                if (e.code === 'ENOENT') return res.status(404).json({ error: `File not found: ${filePath}` });
                 res.status(500).json({ error: e.message });
             }
         } catch (e) {
