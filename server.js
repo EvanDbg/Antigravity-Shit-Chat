@@ -1573,6 +1573,17 @@ async function main() {
         }
     });
 
+    // Scroll debug endpoint
+    app.post('/debug-log', (req, res) => {
+        try {
+            const logEntry = `[${new Date().toISOString()}] DEBUG_LOG: ${JSON.stringify(req.body)}\n`;
+            require('fs').appendFileSync(require('path').join(__dirname, 'scroll-debug.log'), logEntry);
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // Scroll passthrough: forward scroll events to IDE chat container
     app.post('/scroll/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
@@ -1640,6 +1651,7 @@ async function main() {
             });
             const val = result.result?.value;
             console.log('Scroll API from IDE:', val);
+            require('fs').appendFileSync(require('path').join(__dirname, 'scroll-debug.log'), `[${new Date().toISOString()}] IDE_SCROLL_RESULT: ${JSON.stringify(val)}\n`);
             if (val?.error) return res.status(500).json({ error: val.error });
 
             // Wait for lazy loading to trigger, then refresh snapshot

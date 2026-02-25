@@ -97,6 +97,11 @@ export async function applyCascadeStyles(id) {
           line-height: 1.6;
         }
 
+        /* Global text-decoration reset — kill IDE underlines */
+        #chat-viewport, #chat-viewport * {
+          text-decoration: none !important;
+        }
+
         ${data.css || ''}
 
         /* Fix overflow in web context — only top-level containers */
@@ -108,7 +113,6 @@ export async function applyCascadeStyles(id) {
         #chat-viewport #chat {
           overflow-y: visible !important;
           overflow-x: hidden !important;
-          height: auto !important;
           max-height: none !important;
           padding-bottom: 0 !important;
           margin-bottom: 0 !important;
@@ -284,6 +288,20 @@ export async function updateContent(id) {
       });
     });
 
+    // ----- [DEBUG PROBE] -----
+    fetch('/debug-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'updateContent_Calc',
+        isAtBottom: isAtBottom,
+        maxContentBottom: maxContentBottom,
+        containerHeight: container ? container.clientHeight : 0,
+        containerScrollTop: container ? container.scrollTop : 0
+      })
+    }).catch(()=>{});
+    // -------------------------
+
     if (isAtBottom && container) {
       // 在原先的暴力拖底方案中（scrollTop = scrollHeight），由于 IDE 喜欢在下方附带成千上万像素的虚拟占位符，
       // 会导致滑落无底深渊。现在我们既然测得了真实 DOM 排布到了哪里 (maxContentBottom)，
@@ -398,9 +416,6 @@ async function handleCDPClick(e) {
 // ------------------------------------------------------------------
 function handleScrollSync() {
   if (!currentId) return;
-  // In light/dark mode, all content is expanded (overflow:visible), no need for scroll sync
-  const theme = getSnapshotTheme();
-  if (theme !== 'follow') return;
 
   const container = document.getElementById('chatContainer');
   
@@ -420,6 +435,20 @@ function handleScrollSync() {
 
     // Lock immediately so rapid scroll events before fetch resolves are queued
     scrollSyncLock = true;
+
+    // ----- [DEBUG PROBE] -----
+    fetch('/debug-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'handleScrollSync_Trigger',
+        scrollTop: container.scrollTop,
+        maxScroll: max,
+        ratio: ratio,
+        containerHeight: container.clientHeight
+      })
+    }).catch(()=>{});
+    // -------------------------
 
     fetch(`/scroll/${currentId}`, {
       method: 'POST',
