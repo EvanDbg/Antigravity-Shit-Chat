@@ -351,12 +351,15 @@ async function handleCDPClick(e) {
   clickable.style.opacity = '0.6';
 
   try {
-    // Close current editor tab
-    try {
-      const closeRes = await fetch(`/api/close-tab/${currentId}`, { method: 'POST' });
-      const closeData = await closeRes.json();
-      if (closeData.success) await new Promise(r => setTimeout(r, 300));
-    } catch (_) { }
+    // 仅在明确点击带有文件名的元素（打算预览文件内容）时，才尝试关闭当前的旧标签页。
+    // 严禁在此处无条件调用，否则会误杀“收起/展开”等普通 UI 控件。
+    if (hasFileName) {
+      try {
+        const closeRes = await fetch(`/api/close-tab/${currentId}`, { method: 'POST' });
+        const closeData = await closeRes.json();
+        if (closeData.success) await new Promise(r => setTimeout(r, 300));
+      } catch (_) { }
+    }
 
     // Record current tab for non-file elements
     let beforeTab = null;
