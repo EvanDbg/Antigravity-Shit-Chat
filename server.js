@@ -1641,6 +1641,7 @@ async function main() {
                         // 【死锁修复】切忌直接派发巨额 diffY，否则内置的独立滚动侦听器（比如 React Virtuoso）
                         // 会将其作为连续滑动动能直接叠加在其自己的内部 State 里，导致在刚赋予了新 scrollTop 后
                         // 又爆冲出去并在之后的 Snapshot 里跳动回来产生抖屏！只给 1 像素的打断暗示即可。
+                        // ⚠️ 已知限制: new WheelEvent 的 isTrusted 始终为 false，若未来 VSCode 版本严格校验此属性则需替代方案。
                         scrollEl.dispatchEvent(new WheelEvent('wheel', { deltaY: Math.sign(diffY) * 1, bubbles: true }));
                     }
 

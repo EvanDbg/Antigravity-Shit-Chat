@@ -184,6 +184,7 @@ export async function applyCascadeStyles(id) {
 // ------------------------------------------------------------------
 let lastContentHash = '';
 let preventAutoBottomScroll = false;
+let _preventAutoBottomTimer = null;
 
 export async function updateContent(id) {
   if (!shadowRoot) return;
@@ -290,31 +291,29 @@ export async function updateContent(id) {
     // minimum `top` value found, then shrink the spacer accordingly.
     // ============================================================
     viewport.querySelectorAll('.monaco-list-rows').forEach(list => {
+      const children = Array.from(list.children);
       let minTop = Infinity;
-      Array.from(list.children).forEach(child => {
+      for (const child of children) {
         const t = parseFloat(child.style.top);
         if (!isNaN(t) && t < minTop) minTop = t;
-      });
+      }
       if (minTop > 100 && isFinite(minTop)) {
-        // Shift every child up by minTop
-        Array.from(list.children).forEach(child => {
+        for (const child of children) {
           const t = parseFloat(child.style.top);
           if (!isNaN(t)) child.style.top = (t - minTop) + 'px';
-        });
-        // Shrink the list container's own height if explicitly set
+        }
         const listH = parseFloat(list.style.height);
         if (!isNaN(listH) && listH > minTop) {
           list.style.height = (listH - minTop) + 'px';
         }
-        // Also shrink any sibling spacer div (Virtuoso often uses one)
         if (list.parentElement) {
-          Array.from(list.parentElement.children).forEach(sib => {
-            if (sib === list) return;
+          for (const sib of Array.from(list.parentElement.children)) {
+            if (sib === list) continue;
             const sibH = parseFloat(sib.style.height);
             if (!isNaN(sibH) && sibH > minTop) {
               sib.style.height = (sibH - minTop) + 'px';
             }
-          });
+          }
         }
       }
     });
@@ -404,13 +403,16 @@ async function handleCDPClick(e) {
     // Record current tab for non-file elements
     let beforeTab = null;
     if (!hasFileName) {
-      const beforeRes = await fetch(`/api/active-tab-name/${currentId}`).catch(()=>({}));
-      if (beforeRes && beforeRes.json) beforeTab = await beforeRes.json();
+      try {
+        const beforeRes = await fetch(`/api/active-tab-name/${currentId}`);
+        beforeTab = await beforeRes.json();
+      } catch (_) { /* 网络异常时跳过 tab 记录 */ }
       
       // 当非文件跳转类点击触发时（很大可能是面板折叠、按钮），
-      // 我们为其锁定随后 1.5 秒内的追底行为，以防内容大幅变动引起阅读视口塌陷。
+      // 为其锁定随后 1.5 秒内的追底行为，以防内容大幅变动引起阅读视口塌陷。
       preventAutoBottomScroll = true;
-      setTimeout(() => { preventAutoBottomScroll = false; }, 1500);
+      clearTimeout(_preventAutoBottomTimer);
+      _preventAutoBottomTimer = setTimeout(() => { preventAutoBottomScroll = false; }, 1500);
     }
 
     // Execute CDP click
@@ -707,21 +709,7 @@ export function setSnapshotTheme(mode) {
         border-style: solid !important;
         border-color: #e0e3e8 !important;
       }
-      
-      /* Restore unidirectional Tailwind borders (like dividers) that might be invisible dark/white strings */
-      #chat-viewport [class*="border-t"],
-      #chat-viewport [class*="border-b"],
-      #chat-viewport [class*="border-l"],
-      #chat-viewport [class*="border-r"] {
-        border-color: #e0e3e8 !important;
-      }
-
-      /* Capture explicit VSCode spliter lines (sashes) which use background color */
-      #chat-viewport .sash,
-      #chat-viewport .monaco-sash,
-      #chat-viewport .divider {
-        background-color: #e0e3e8 !important;
-      }
+      /* NOTE: Tailwind border-t/b/l/r and sash overrides live in snapshot.css (Shadow DOM scope) */
 
       /* 9. Badges, special tags — keep slightly tinted bg */
       #chat-viewport [class*="badge"],
