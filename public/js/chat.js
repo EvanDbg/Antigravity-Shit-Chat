@@ -196,6 +196,7 @@ export async function updateContent(id) {
     if (hash === lastContentHash && hash !== '') return;
     lastContentHash = hash;
 
+    const isInitialLoad = lastContentHash === '';
     const container = document.getElementById('chatContainer');
     const isAtBottom = container
       ? container.scrollHeight - container.scrollTop - container.clientHeight < 50
@@ -288,21 +289,8 @@ export async function updateContent(id) {
       });
     });
 
-    // ----- [DEBUG PROBE] -----
-    fetch('/debug-log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'updateContent_Calc',
-        isAtBottom: isAtBottom,
-        maxContentBottom: maxContentBottom,
-        containerHeight: container ? container.clientHeight : 0,
-        containerScrollTop: container ? container.scrollTop : 0
-      })
-    }).catch(()=>{});
-    // -------------------------
-
-    if (isAtBottom && container) {
+    // 触发滚动补丁：当容器本身就滚动到底部，或者这是第一次加载（此时scrollTop常常为0，但内容定位可能极高导致满屏留白）
+    if ((isAtBottom || isInitialLoad) && container) {
       // 在原先的暴力拖底方案中（scrollTop = scrollHeight），由于 IDE 喜欢在下方附带成千上万像素的虚拟占位符，
       // 会导致滑落无底深渊。现在我们既然测得了真实 DOM 排布到了哪里 (maxContentBottom)，
       // 那么理想的降落点，其实就是将这批最后内容的底缘，卡在视口（clientHeight）的底盘处（并附带上可能的一点 Padding）。
