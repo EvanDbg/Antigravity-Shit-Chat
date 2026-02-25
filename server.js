@@ -472,7 +472,7 @@ async function captureHTML(cdp) {
         if (!target) return { error: 'chat container not found' };
         
         // Annotate clickable elements for click passthrough
-        const clickSelector = 'button, a, [role="button"], [class*="cursor-pointer"]';
+        const clickSelector = 'button, a, [role="button"], [class*="cursor-pointer"], [role="menuitem"], [role="option"], [role="tab"], [role="combobox"], [class*="backdrop"], [class*="overlay"]';
         const liveClickables = Array.from(target.querySelectorAll(clickSelector));
         const selectorMap = {};
         liveClickables.forEach((el, i) => {
@@ -1537,10 +1537,11 @@ async function main() {
             // Enhanced: also try to extract the file path from the element context
             const result = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
-                    const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-                    if (!el) return { ok: false, reason: 'element not found' };
+                  try {
+                    const el = document.querySelector(${JSON.stringify(selector)});
+                    if (!el) return { ok: false, reason: 'element not found: ' + ${JSON.stringify(selector)} };
                     el.click();
-                    const text = el.textContent.substring(0, 200).trim();
+                    const text = (el.textContent || '').substring(0, 200).trim();
                     // Try to detect file path from nearby context
                     let filePath = null;
                     const href = el.getAttribute('href') || '';
@@ -1553,6 +1554,9 @@ async function main() {
                         filePath = decodeURIComponent(dataUri.replace('file://', ''));
                     }
                     return { ok: true, text, filePath };
+                  } catch (e) {
+                    return { ok: false, reason: 'JS Eval Exception: ' + e.message };
+                  }
                 })()`,
                 returnByValue: true,
                 contextId: c.cdp.rootContextId
@@ -1574,16 +1578,21 @@ async function main() {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
 
-        const { deltaY, ratio } = req.body;
-        if (deltaY === undefined && ratio === undefined) {
-            return res.status(400).json({ error: 'deltaY or ratio required' });
+        const { deltaY, ratio, scrollTop } = req.body;
+        if (deltaY === undefined && ratio === undefined && scrollTop === undefined) {
+            return res.status(400).json({ error: 'deltaY, ratio or scrollTop required' });
         }
 
         try {
-            // Use ratio for absolute positioning, deltaY for relative
-            const scrollExpr = ratio !== undefined
-                ? `scrollEl.scrollTop = ${ratio} * (scrollEl.scrollHeight - scrollEl.clientHeight)`
-                : `scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + ${deltaY})`;
+            // Use scrollTop for exact absolute positioning, ratio as fallback, deltaY for relative
+            let scrollExpr = '';
+            if (scrollTop !== undefined) {
+                scrollExpr = `scrollEl.scrollTop = ${scrollTop}`;
+            } else if (ratio !== undefined) {
+                scrollExpr = `scrollEl.scrollTop = ${ratio} * (scrollEl.scrollHeight - scrollEl.clientHeight)`;
+            } else {
+                scrollExpr = `scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + ${deltaY})`;
+            }
 
             const result = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
@@ -1591,6 +1600,9 @@ async function main() {
                     if (!target) return { error: 'no target' };
                     function findScrollable(el, depth) {
                         if (depth > 8) return null;
+                        if (el.classList && (el.classList.contains('monaco-scrollable-element') || el.classList.contains('monaco-list'))) {
+                            return el;
+                        }
                         const s = getComputedStyle(el);
                         if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) return el;
                         for (const ch of el.children) { const f = findScrollable(ch, depth + 1); if (f) return f; }
@@ -1599,16 +1611,25 @@ async function main() {
                     const scrollEl = findScrollable(target, 0);
                     if (!scrollEl) return { error: 'no scrollable element' };
                     ${scrollExpr};
-                    return {
-                        scrollTop: scrollEl.scrollTop,
-                        scrollHeight: scrollEl.scrollHeight,
-                        clientHeight: scrollEl.clientHeight
-                    };
+                    
+                    // Dispatch scroll event to wake up Monaco's virtual list rendering
+                    scrollEl.dispatchEvent(new Event('scroll', { bubbles: true }));
+                    scrollEl.dispatchEvent(new CustomEvent('scroll', { bubbles: true }));
+                    
+                    // Short delay to let React/Monaco process the scroll event and patch the DOM
+                    return new Promise(resolve => {
+                        setTimeout(() => resolve({
+                            scrollTop: scrollEl.scrollTop,
+                            scrollHeight: scrollEl.scrollHeight,
+                            clientHeight: scrollEl.clientHeight
+                        }), 150);
+                    });
                 })()`,
                 returnByValue: true,
                 contextId: c.cdp.rootContextId
             });
             const val = result.result?.value;
+            console.log('Scroll API from IDE:', val);
             if (val?.error) return res.status(500).json({ error: val.error });
 
             // Wait for lazy loading to trigger, then refresh snapshot
