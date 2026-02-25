@@ -189,18 +189,13 @@ async function connectCDP(url) {
         ws.on('error', reject);
     });
 
+    // 统一管理所有 pending 的 CDP 呼叫
+    const pendingCalls = new Map();
     let idCounter = 1;
+
     const call = (method, params) => new Promise((resolve, reject) => {
         const id = idCounter++;
-        const handler = (msg) => {
-            const data = JSON.parse(msg);
-            if (data.id === id) {
-                ws.off('message', handler);
-                if (data.error) reject(data.error);
-                else resolve(data.result);
-            }
-        };
-        ws.on('message', handler);
+        pendingCalls.set(id, { resolve, reject });
         ws.send(JSON.stringify({ id, method, params }));
     });
 
@@ -208,6 +203,14 @@ async function connectCDP(url) {
     ws.on('message', (msg) => {
         try {
             const data = JSON.parse(msg);
+            // 处理 CDP 指令响应
+            if (data.id && pendingCalls.has(data.id)) {
+                const { resolve, reject } = pendingCalls.get(data.id);
+                pendingCalls.delete(data.id);
+                if (data.error) reject(data.error);
+                else resolve(data.result);
+            }
+            // 处理上下文挂载/销毁广播
             if (data.method === 'Runtime.executionContextCreated') {
                 contexts.push(data.params.context);
             } else if (data.method === 'Runtime.executionContextDestroyed') {
@@ -560,8 +563,8 @@ async function captureHTML(cdp) {
                 returnByValue: true,
                 contextId: meta.contextId
             });
-            if (result.result?.value && !result.result.value.error) {
-                return result.result.value;
+            if (result.result?.value && typeof result.result.value === 'string') {
+                return { html: result.result.value };
             }
         }
     } catch (e) { }
@@ -1573,17 +1576,6 @@ async function main() {
         }
     });
 
-    // Scroll debug endpoint
-    app.post('/debug-log', (req, res) => {
-        try {
-            const logEntry = `[${new Date().toISOString()}] DEBUG_LOG: ${JSON.stringify(req.body)}\n`;
-            require('fs').appendFileSync(require('path').join(__dirname, 'scroll-debug.log'), logEntry);
-            res.json({ ok: true });
-        } catch (e) {
-            res.status(500).json({ error: e.message });
-        }
-    });
-
     // Scroll passthrough: forward scroll events to IDE chat container
     app.post('/scroll/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
@@ -1650,8 +1642,6 @@ async function main() {
                 contextId: c.cdp.rootContextId
             });
             const val = result.result?.value;
-            console.log('Scroll API from IDE:', val);
-            require('fs').appendFileSync(require('path').join(__dirname, 'scroll-debug.log'), `[${new Date().toISOString()}] IDE_SCROLL_RESULT: ${JSON.stringify(val)}\n`);
             if (val?.error) return res.status(500).json({ error: val.error });
 
             // Wait for lazy loading to trigger, then refresh snapshot
