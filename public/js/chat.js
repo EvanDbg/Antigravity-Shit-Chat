@@ -281,6 +281,44 @@ export async function updateContent(id) {
       });
     }
 
+    // ============================================================
+    // Virtual list spacer compression: collapse blank top space
+    // Virtuoso / Monaco's virtual list keeps a giant spacer for
+    // scrolled-out history nodes. On mobile we don't render those
+    // virtual items, so the first ~100k px are empty darkness.
+    // Fix: shift all absolutely-positioned children upward by the
+    // minimum `top` value found, then shrink the spacer accordingly.
+    // ============================================================
+    viewport.querySelectorAll('.monaco-list-rows').forEach(list => {
+      let minTop = Infinity;
+      Array.from(list.children).forEach(child => {
+        const t = parseFloat(child.style.top);
+        if (!isNaN(t) && t < minTop) minTop = t;
+      });
+      if (minTop > 100 && isFinite(minTop)) {
+        // Shift every child up by minTop
+        Array.from(list.children).forEach(child => {
+          const t = parseFloat(child.style.top);
+          if (!isNaN(t)) child.style.top = (t - minTop) + 'px';
+        });
+        // Shrink the list container's own height if explicitly set
+        const listH = parseFloat(list.style.height);
+        if (!isNaN(listH) && listH > minTop) {
+          list.style.height = (listH - minTop) + 'px';
+        }
+        // Also shrink any sibling spacer div (Virtuoso often uses one)
+        if (list.parentElement) {
+          Array.from(list.parentElement.children).forEach(sib => {
+            if (sib === list) return;
+            const sibH = parseFloat(sib.style.height);
+            if (!isNaN(sibH) && sibH > minTop) {
+              sib.style.height = (sibH - minTop) + 'px';
+            }
+          });
+        }
+      }
+    });
+
     // 恢复 IDE 虚拟列表的超真实全量高度，不能强制缩小，否则会摧毁上下滑动的滚动对位比（ ratio 错位致盲）
     let maxContentBottom = 0;
     viewport.querySelectorAll('.monaco-list-rows').forEach(list => {
