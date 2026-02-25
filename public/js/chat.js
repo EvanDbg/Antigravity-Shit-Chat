@@ -183,6 +183,7 @@ export async function applyCascadeStyles(id) {
 // Update content with morphdom diff
 // ------------------------------------------------------------------
 let lastContentHash = '';
+let preventAutoBottomScroll = false;
 
 export async function updateContent(id) {
   if (!shadowRoot) return;
@@ -289,8 +290,9 @@ export async function updateContent(id) {
       });
     });
 
-    // 触发滚动补丁：当容器本身就滚动到底部，或者这是第一次加载（此时scrollTop常常为0，但内容定位可能极高导致满屏留白）
-    if ((isAtBottom || isInitialLoad) && container) {
+    // 触发滚动补丁：当容器本身就滚动到底部，或者这是第一次加载
+    // 【拦截器】如果最近有过交互点击阻止向下强拉视野的行为（防止展开大量折叠项时视野乱飞）
+    if ((isAtBottom || isInitialLoad) && container && !preventAutoBottomScroll) {
       // 在原先的暴力拖底方案中（scrollTop = scrollHeight），由于 IDE 喜欢在下方附带成千上万像素的虚拟占位符，
       // 会导致滑落无底深渊。现在我们既然测得了真实 DOM 排布到了哪里 (maxContentBottom)，
       // 那么理想的降落点，其实就是将这批最后内容的底缘，卡在视口（clientHeight）的底盘处（并附带上可能的一点 Padding）。
@@ -364,8 +366,13 @@ async function handleCDPClick(e) {
     // Record current tab for non-file elements
     let beforeTab = null;
     if (!hasFileName) {
-      const beforeRes = await fetch(`/api/active-tab-name/${currentId}`);
-      beforeTab = await beforeRes.json();
+      const beforeRes = await fetch(`/api/active-tab-name/${currentId}`).catch(()=>({}));
+      if (beforeRes && beforeRes.json) beforeTab = await beforeRes.json();
+      
+      // 当非文件跳转类点击触发时（很大可能是面板折叠、按钮），
+      // 我们为其锁定随后 1.5 秒内的追底行为，以防内容大幅变动引起阅读视口塌陷。
+      preventAutoBottomScroll = true;
+      setTimeout(() => { preventAutoBottomScroll = false; }, 1500);
     }
 
     // Execute CDP click

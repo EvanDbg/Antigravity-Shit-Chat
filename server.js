@@ -1623,8 +1623,18 @@ async function main() {
                     }
                     const scrollEl = findScrollable(target, 0);
                     if (!scrollEl) return { error: 'no scrollable element' };
-                    ${scrollExpr};
                     
+                    // 伪造真实的人为滑动方向滚轮事件，以强制打断 IDE 的自动追踪底部（auto-scroll）机制
+                    // 原先的粗暴 scrollTop 赋值会被 React 或内置的虚拟列表当成系统调整而予以无视，继续顽强地跳回最底端
+                    const beforeScroll = scrollEl.scrollTop;
+                    ${scrollExpr};
+                    const diffY = scrollEl.scrollTop - beforeScroll;
+                    
+                    // 只有真正在后端产生了滚动落差，才去唤醒底层的脱锁逻辑
+                    if (diffY !== 0) {
+                        scrollEl.dispatchEvent(new WheelEvent('wheel', { deltaY: diffY, bubbles: true }));
+                    }
+
                     // Dispatch scroll event to wake up Monaco's virtual list rendering
                     scrollEl.dispatchEvent(new Event('scroll', { bubbles: true }));
                     scrollEl.dispatchEvent(new CustomEvent('scroll', { bubbles: true }));
