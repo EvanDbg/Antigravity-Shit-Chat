@@ -344,6 +344,12 @@ async function captureComputedVars(cdp) {
             '--vscode-notifications-border', '--vscode-banner-background',
             '--vscode-font-family', '--vscode-font-size', '--vscode-font-weight',
             '--vscode-editor-font-family', '--vscode-editor-font-size',
+            // --- UI Separators & Borders ---
+            '--vscode-panel-border', '--vscode-editorGroup-border', 
+            '--vscode-widget-border', '--vscode-sash-hoverBorder',
+            '--vscode-sideBarSectionHeader-border', '--vscode-chat-requestBorder',
+            '--vscode-settings-focusedRowBorder', '--vscode-activityBar-border',
+            '--vscode-menu-border', '--vscode-titleBar-border',
             // IDE-specific button & UI variables (set programmatically by Antigravity)
             '--ide-button-background', '--ide-button-foreground', '--ide-button-color',
             '--ide-button-hover-background', '--ide-button-secondary-background',

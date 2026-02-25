@@ -669,6 +669,21 @@ export function setSnapshotTheme(mode) {
         border-style: solid !important;
         border-color: #e0e3e8 !important;
       }
+      
+      /* Restore unidirectional Tailwind borders (like dividers) that might be invisible dark/white strings */
+      #chat-viewport [class*="border-t"],
+      #chat-viewport [class*="border-b"],
+      #chat-viewport [class*="border-l"],
+      #chat-viewport [class*="border-r"] {
+        border-color: #e0e3e8 !important;
+      }
+
+      /* Capture explicit VSCode spliter lines (sashes) which use background color */
+      #chat-viewport .sash,
+      #chat-viewport .monaco-sash,
+      #chat-viewport .divider {
+        background-color: #e0e3e8 !important;
+      }
 
       /* 9. Badges, special tags — keep slightly tinted bg */
       #chat-viewport [class*="badge"],
