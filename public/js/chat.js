@@ -7,6 +7,7 @@ let shadowRoot = null;
 let currentId = null;
 let scrollSyncLock = false;
 let scrollTimer = null;
+let pendingScrollTop = null;
 
 // Morphdom: loaded as UMD from vendor/
 const morphdomReady = new Promise((resolve) => {
@@ -396,18 +397,29 @@ async function handleCDPClick(e) {
 // Scroll sync
 // ------------------------------------------------------------------
 function handleScrollSync() {
-  if (!currentId || scrollSyncLock) return;
+  if (!currentId) return;
   // In light/dark mode, all content is expanded (overflow:visible), no need for scroll sync
   const theme = getSnapshotTheme();
   if (theme !== 'follow') return;
-  if (scrollTimer) clearTimeout(scrollTimer);
 
   const container = document.getElementById('chatContainer');
+  
+  if (scrollSyncLock) {
+    // Save scroll requests that happen during an ongoing fetch/render lock
+    pendingScrollTop = container.scrollTop;
+    return;
+  }
+
+  if (scrollTimer) clearTimeout(scrollTimer);
 
   scrollTimer = setTimeout(() => {
+    pendingScrollTop = null;
     const max = container.scrollHeight - container.clientHeight;
     if (max <= 0) return;
     const ratio = container.scrollTop / max;
+
+    // Lock immediately so rapid scroll events before fetch resolves are queued
+    scrollSyncLock = true;
 
     fetch(`/scroll/${currentId}`, {
       method: 'POST',
@@ -415,16 +427,28 @@ function handleScrollSync() {
       body: JSON.stringify({ ratio, scrollTop: container.scrollTop })
     }).then(() => {
       setTimeout(() => {
-        scrollSyncLock = true;
         updateContent(currentId).finally(() => {
-          setTimeout(() => { scrollSyncLock = false; }, 200);
+          setTimeout(() => { 
+            scrollSyncLock = false; 
+            // Drain the pending scroll event if user kept scrolling!
+            if (pendingScrollTop !== null) {
+              handleScrollSync();
+            }
+          }, 200);
         });
       }, 400);
     }).catch(e => {
       console.error('Scroll sync error:', e);
+      scrollSyncLock = false;
+      if (pendingScrollTop !== null) handleScrollSync();
     }).finally(() => {
       // Ensure lock is released even on network failure
-      setTimeout(() => { scrollSyncLock = false; }, 1000);
+      setTimeout(() => { 
+        if (scrollSyncLock) {
+          scrollSyncLock = false; 
+          if (pendingScrollTop !== null) handleScrollSync();
+        }
+      }, 2500);
     });
   }, 300);
 }
