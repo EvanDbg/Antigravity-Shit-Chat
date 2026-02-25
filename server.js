@@ -1585,13 +1585,23 @@ async function main() {
 
         try {
             // Use scrollTop for exact absolute positioning, ratio as fallback, deltaY for relative
+            // Use limits to prevent mobile rubber-banding/clamping bugs from crashing Monaco's viewport calculations
             let scrollExpr = '';
             if (scrollTop !== undefined) {
-                scrollExpr = `scrollEl.scrollTop = ${scrollTop}`;
+                scrollExpr = `
+                    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+                    scrollEl.scrollTop = Math.max(0, Math.min(maxScroll, ${scrollTop}));
+                `;
             } else if (ratio !== undefined) {
-                scrollExpr = `scrollEl.scrollTop = ${ratio} * (scrollEl.scrollHeight - scrollEl.clientHeight)`;
+                scrollExpr = `
+                    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+                    scrollEl.scrollTop = Math.max(0, Math.min(1, ${ratio})) * maxScroll;
+                `;
             } else {
-                scrollExpr = `scrollEl.scrollTop = Math.max(0, scrollEl.scrollTop + ${deltaY})`;
+                scrollExpr = `
+                    const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+                    scrollEl.scrollTop = Math.max(0, Math.min(maxScroll, scrollEl.scrollTop + ${deltaY}));
+                `;
             }
 
             const result = await c.cdp.call('Runtime.evaluate', {
