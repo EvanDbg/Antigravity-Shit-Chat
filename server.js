@@ -22,9 +22,9 @@ const configPath = join(__dirname, 'config.json');
 if (existsSync(configPath)) {
     try {
         userConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
-        console.log('馃搵 Loaded config from config.json');
+        console.log('📋 Loaded config from config.json');
     } catch (e) {
-        console.warn('鈿狅笍 Failed to parse config.json, using defaults');
+        console.warn('⚠️ Failed to parse config.json, using defaults');
     }
 }
 
@@ -611,7 +611,7 @@ async function discover() {
 
         // New connection
         try {
-            console.log(`馃攲 Connecting to ${target.title}`);
+            console.log(`🔌 Connecting to ${target.title}`);
             const cdp = await connectCDP(target.webSocketDebuggerUrl);
             const meta = await extractMetadata(cdp);
 
@@ -637,7 +637,7 @@ async function discover() {
                     lastFeedbackFingerprint: null
                 };
                 newCascades.set(id, cascade);
-                console.log(`鉁?Added cascade: ${meta.chatTitle}`);
+                console.log(`✅ Added cascade: ${meta.chatTitle}`);
             } else {
                 cdp.ws.close();
             }
@@ -649,7 +649,7 @@ async function discover() {
     // 3. Cleanup old
     for (const [id, c] of cascades.entries()) {
         if (!newCascades.has(id)) {
-            console.log(`馃憢 Removing cascade: ${c.metadata.chatTitle}`);
+            console.log(`👋 Removing cascade: ${c.metadata.chatTitle}`);
             try { c.cdp.ws.close(); } catch (e) { }
         }
     }
@@ -782,7 +782,7 @@ async function main() {
         res.sendFile(join(__dirname, 'public', 'login.html'));
     });
 
-    // Auth middleware 鈥?protects everything else
+    // Auth middleware —protects everything else
     app.use((req, res, next) => {
         const cookies = parseCookies(req.headers.cookie);
         if (verifyToken(cookies.auth)) return next();
@@ -2130,7 +2130,7 @@ async function main() {
             });
             const val = result.result?.value;
             if (val?.ok) {
-                console.log('馃啎 New conversation created');
+                console.log('🎉 New conversation created');
                 res.json({ success: true });
             } else {
                 res.status(500).json({ error: val?.reason || 'failed' });
@@ -2153,7 +2153,7 @@ async function main() {
 
     const PORT = userConfig.port || process.env.PORT || 3563;
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`馃殌 Server running on port ${PORT}`);
+        console.log(`🚀 Server running on port ${PORT}`);
     });
 
     // Start Loops
