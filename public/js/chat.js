@@ -240,6 +240,69 @@ export async function updateContent(id) {
       viewport.innerHTML = data.html;
     }
 
+    // ============================================================
+    // Dynamic Popup Positioning (Anchor to Trigger Element)
+    // Re-calculate any dynamically spawned menus so they anchor properly
+    const popups = Array.from(viewport.querySelectorAll('[data-portal-popup="true"]'));
+    if (popups.length > 0 && lastClickedCdpIndex) {
+        lastPopupIndex++;
+        
+        popups.forEach((p, idx) => {
+            // Enforce singleton visibility - only keep the last (most recent) popup visible
+            if (idx !== popups.length - 1) {
+                p.style.setProperty('display', 'none', 'important');
+                p.style.setProperty('opacity', '0', 'important');
+                p.style.setProperty('pointer-events', 'none', 'important');
+            } else {
+                p.style.setProperty('display', 'block', 'important');
+                p.style.setProperty('opacity', '1', 'important');
+                p.style.setProperty('pointer-events', 'auto', 'important');
+                p.style.setProperty('position', 'fixed', 'important');
+                
+                // Clear any leftover inline/CSS overrides
+                p.style.top = 'auto';
+                p.style.bottom = 'auto';
+                p.style.left = 'auto';
+                p.style.right = 'auto';
+                p.style.transform = 'none';
+                p.style.margin = '0';
+                
+                // Calculate width/position safely after a brief layout yield
+                setTimeout(() => {
+                    const anchorNode = viewport.querySelector(`[data-cdp-click="${lastClickedCdpIndex}"]`);
+                    if (anchorNode) {
+                        const anchorRect = anchorNode.getBoundingClientRect();
+                        const vh = window.innerHeight;
+                        const vw = window.innerWidth;
+                        const topSpace = anchorRect.top;
+                        const bottomSpace = vh - anchorRect.bottom;
+                        
+                        const pWidth = p.offsetWidth || 300;
+                        const pHeight = p.offsetHeight || 200;
+                        
+                        let leftPos = anchorRect.left + (anchorRect.width / 2) - (pWidth / 2);
+                        leftPos = Math.max(10, Math.min(leftPos, vw - pWidth - 10)); // bounds check
+                        p.style.left = leftPos + 'px';
+                        
+                        // Adaptive Positioning Algorithm
+                        if (topSpace > bottomSpace && topSpace > (pHeight + 20)) {
+                            // Upwards
+                            p.style.top = Math.max(10, anchorRect.top - pHeight - 8) + 'px';
+                        } else {
+                            // Downwards
+                            p.style.top = Math.max(10, anchorRect.bottom + 8) + 'px';
+                        }
+                    } else {
+                        // Safe fallback to center screen if anchor vanished
+                        p.style.top = '50%';
+                        p.style.left = '50%';
+                        p.style.transform = 'translate(-50%, -50%)';
+                    }
+                }, 10);
+            }
+        });
+    }
+
     // Post-process: detect file names
     const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|vue|svelte))\b/i;
     shadowRoot.querySelectorAll('[data-cdp-click]').forEach(el => {
@@ -345,12 +408,143 @@ export async function updateContent(id) {
 }
 
 // ------------------------------------------------------------------
+// Global Popup ClickAway & Dynamic Positioning Variables
+// ------------------------------------------------------------------
+let lastClickedCdpIndex = null;
+let lastPopupIndex = 0;
+
+document.addEventListener('click', async (e) => {
+  // Ignore clicks inside popups or on potential trigger elements
+  if (e.target.closest('[data-portal-popup="true"], [role="menu"], [role="listbox"], .monaco-menu-container, .context-view, [data-radix-popper-content-wrapper], [data-cdp-click]')) {
+      return; 
+  }
+  
+  if (!currentId) return;
+
+  const visiblePopups = shadowRoot ? shadowRoot.querySelectorAll('#chat-viewport [data-portal-popup="true"], #chat-viewport [role="menu"], #chat-viewport [role="listbox"], #chat-viewport .context-view, #chat-viewport [data-radix-popper-content-wrapper], #chat-viewport .monaco-menu-container') : [];
+  let foundVisible = false;
+  visiblePopups.forEach(p => {
+      // Intentionally close it
+      if (p.style.display !== 'none' && p.style.opacity !== '0') {
+          p.style.setProperty('display', 'none', 'important');
+          p.style.setProperty('opacity', '0', 'important');
+          p.style.setProperty('pointer-events', 'none', 'important');
+          foundVisible = true;
+      }
+  });
+
+  if (foundVisible) {
+      try {
+          // Send escape key sequence to IDE natively
+          await fetch(`/api/dismiss-popups/${currentId}`, { method: 'POST' });
+          // Force UI refresh quickly to visually match the logic state
+          document.dispatchEvent(new CustomEvent('snapshot-update', { detail: { id: currentId } }));
+      } catch(err) {}
+  }
+});
+
+// ------------------------------------------------------------------
+// Custom Dropdown Fallback for Native Select/VSCode-Dropdown
+// ------------------------------------------------------------------
+function renderCustomNativeDropdown(el, idx, options) {
+    const old = document.body.querySelector('.native-dropdown-fallback');
+    if (old) old.remove();
+
+    const popup = document.createElement('div');
+    popup.className = 'native-dropdown-fallback';
+    popup.setAttribute('data-portal-popup', 'true');
+    
+    const rect = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    
+    popup.style.position = 'fixed';
+    popup.style.width = Math.max(160, rect.width) + 'px';
+    popup.style.maxHeight = '40vh';
+    popup.style.overflowY = 'auto';
+    popup.style.background = 'var(--vscode-dropdown-background, #252526)';
+    popup.style.border = '1px solid var(--vscode-dropdown-border, rgba(128,128,128,0.2))';
+    popup.style.color = 'var(--vscode-dropdown-foreground, #f0f0f0)';
+    popup.style.borderRadius = '6px';
+    popup.style.boxShadow = '0 6px 20px rgba(0,0,0,0.3)';
+    popup.style.zIndex = '10000';
+    popup.style.padding = '4px';
+
+    let leftPos = rect.left;
+    leftPos = Math.max(10, Math.min(leftPos, window.innerWidth - Math.max(160, rect.width) - 10));
+    popup.style.left = leftPos + 'px';
+    
+    if (rect.top > (vh - rect.bottom) && rect.top > 250) {
+        popup.style.bottom = Math.max(10, vh - rect.top + 5) + 'px';
+    } else {
+        popup.style.top = Math.max(10, rect.bottom + 5) + 'px';
+    }
+
+    options.forEach(opt => {
+        const item = document.createElement('div');
+        item.textContent = opt.textContent.trim() || opt.value || 'Option';
+        item.style.padding = '10px 14px';
+        item.style.cursor = 'pointer';
+        item.style.borderRadius = '4px';
+        item.style.fontSize = '14px';
+        item.style.minHeight = '24px';
+        
+        const isSelected = opt.selected || opt.hasAttribute('selected');
+        if (isSelected) {
+            item.style.background = 'var(--vscode-list-activeSelectionBackground, #094771)';
+            item.style.color = 'var(--vscode-list-activeSelectionForeground, #ffffff)';
+        }
+
+        const hoverOn = () => { if (!isSelected) item.style.background = 'var(--vscode-list-hoverBackground, #2a2d2e)'; };
+        const hoverOff = () => { if (!isSelected) item.style.background = 'transparent'; };
+        item.addEventListener('touchstart', hoverOn);
+        item.addEventListener('mouseenter', hoverOn);
+        item.addEventListener('mouseleave', hoverOff);
+
+        item.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            const val = opt.value || opt.getAttribute('value') || opt.textContent.trim();
+            
+            popup.remove();
+            try {
+                await fetch(`/api/set-value/${window.currentId || currentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ elementIndex: idx, value: val })
+                });
+                document.dispatchEvent(new CustomEvent('snapshot-update', { detail: { id: currentId } }));
+            } catch(err) { console.error(err); }
+        });
+        popup.appendChild(item);
+    });
+
+    const viewport = document.getElementById('chat-viewport');
+    if (viewport) viewport.appendChild(popup);
+}
+
+// ------------------------------------------------------------------
 // CDP click passthrough (using composedPath for Shadow DOM)
 // ------------------------------------------------------------------
 async function handleCDPClick(e) {
   const path = e.composedPath();
 
   let clickable = null;
+
+  const topTarget = path[0];
+  if (topTarget && topTarget.tagName) {
+      fetch('/api/telemetry', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+              event: 'click_intercept',
+              targetTag: topTarget.tagName,
+              targetClass: topTarget.className,
+              targetText: topTarget.textContent?.slice(0, 50),
+              targetHTML: topTarget.outerHTML?.slice(0, 200),
+              pathTrace: path.map(p => p.tagName).filter(Boolean).join(' > ')
+          })
+      }).catch(()=>{});
+  }
   
   for (const el of path) {
     if (el.nodeType !== 1) continue;
@@ -359,7 +553,8 @@ async function handleCDPClick(e) {
     const role = el.getAttribute?.('role') || '';
 
     // 1. Explicitly blocked elements where native behavior OR selection should dominate
-    if (/^(CODE|PRE|TABLE|THEAD|TBODY|TR|TH|TD|SUMMARY|DETAILS|INPUT|SELECT|TEXTAREA)$/.test(tag)) {
+    if (/^(CODE|PRE|TABLE|THEAD|TBODY|TR|TH|TD|SUMMARY|DETAILS|INPUT|TEXTAREA)$/.test(tag)) {
+      fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'blocked_by_tag', tag})}).catch(()=>{});
       return; 
     }
 
@@ -371,10 +566,12 @@ async function handleCDPClick(e) {
       const isContainerDiv = el.querySelector('p, pre, table, ul, ol, iframe, code');
       
       // Only honor it if it's an actionable UI tag OR it looks like a custom button container
-      if (/^(A|BUTTON|SPAN|I|SVG|PATH)$/.test(tag) || 
+      if (/^(A|BUTTON|SPAN|I|SVG|PATH|SELECT|VSCODE-DROPDOWN)$/.test(tag) || 
           /^(button|menuitem|option|combobox|listbox|tab)$/i.test(role) ||
           (tag === 'DIV' && typeof cls === 'string' && /pointer|btn|button|action|clickable|menu|toolbar|select|dropdown|backdrop|overlay|dialog|context-view/i.test(cls) && !isContainerDiv)) {
         clickable = el;
+      } else {
+        fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'ignored_cdp_element', tag, cls, role, isContainerDiv: !!isContainerDiv})}).catch(()=>{});
       }
       break; 
     }
@@ -382,10 +579,31 @@ async function handleCDPClick(e) {
 
   if (!clickable || !currentId) return;
 
+  const tag = clickable.tagName.toUpperCase();
+  const idx = clickable.getAttribute('data-cdp-click');
+
+  // If clicked element contains manual options, expose them as a native UI overlay
+  const options = Array.from(clickable.querySelectorAll('vscode-option, option'));
+  
+  fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'checking_options', tag, optionsFound: options.length, outerHTML: clickable.outerHTML?.slice(0, 200)})}).catch(()=>{});
+
+  if (options.length > 0 || tag === 'SELECT' || tag === 'VSCODE-DROPDOWN') {
+      e.stopPropagation();
+      e.preventDefault();
+      fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'intercepted_as_native_dropdown', tag, optionsCount: options.length})}).catch(()=>{});
+      if (options.length > 0) {
+          renderCustomNativeDropdown(clickable, idx, options);
+      } else {
+          fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'empty_dropdown_intercepted'})}).catch(()=>{});
+      }
+      return;
+  }
+
+  lastClickedCdpIndex = idx;
+  fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'passing_cdp_click_to_backend', cdpId: idx})}).catch(()=>{});
+
   e.preventDefault();
   e.stopPropagation();
-
-  const idx = clickable.getAttribute('data-cdp-click');
   const hasFileName = clickable.hasAttribute('data-file-name');
   clickable.style.opacity = '0.6';
 
@@ -556,23 +774,35 @@ export function setSnapshotTheme(mode) {
 
     /* Target specific root-level popups for forced centering safely */
     #chat-viewport [role="menu"][style*="absolute"],
+    #chat-viewport [role="menu"][style*="fixed"],
     #chat-viewport [role="listbox"][style*="absolute"],
+    #chat-viewport [role="listbox"][style*="fixed"],
     #chat-viewport [role="dialog"][style*="absolute"],
+    #chat-viewport [role="dialog"][style*="fixed"],
     #chat-viewport .popover[style*="absolute"],
+    #chat-viewport .popover[style*="fixed"],
     #chat-viewport .context-view,
     #chat-viewport [data-radix-popper-content-wrapper],
     #chat-viewport .monaco-menu-container {
       z-index: 9999 !important;
       position: fixed !important;
-      top: 50% !important;
-      left: 50% !important;
-      transform: translate(-50%, -50%) !important;
       max-width: 90vw !important;
       max-height: 90vh !important;
       overflow: auto !important;
-      background: var(--vscode-editorWidget-background, #fff) !important;
+      background: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
+      border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2))) !important;
       border-radius: 8px !important;
       box-shadow: 0 4px 20px rgba(0,0,0,0.2) !important;
+      color: var(--vscode-editor-foreground, CanvasText) !important;
+    }
+    
+    /* Force visibility overrides for headless UI elements that get snapshot middway through transition */
+    #chat-viewport [role="menu"][style*="visibility: visible"],
+    #chat-viewport [role="listbox"][style*="visibility: visible"],
+    #chat-viewport [role="dialog"][style*="visibility: visible"],
+    #chat-viewport .popover[style*="visibility: visible"] {
+      opacity: 1 !important;
+      pointer-events: auto !important;
     }
 
     /* Hide IDE internal text input parts to prevent duplicate input bars */
@@ -585,7 +815,8 @@ export function setSnapshotTheme(mode) {
     /* Fix headless custom color classes from IDE Tailwind rendering */
     #chat-viewport .bg-ide-chat-background,
     #chat-viewport [class*="bg-ide-chat-background"] {
-      background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff)) !important;
+      background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
+      color: var(--vscode-editor-foreground, CanvasText) !important;
     }
   `;
 
@@ -702,6 +933,10 @@ export function setSnapshotTheme(mode) {
         --vscode-editorWidget-border: #e0e3e8;
         --vscode-input-border: #e0e3e8;
         --vscode-focusBorder: #0969da;
+        --vscode-list-hoverBackground: rgba(0, 0, 0, 0.08);
+        --vscode-list-hoverForeground: #1f2328;
+        --vscode-list-activeSelectionBackground: #0969da;
+        --vscode-list-activeSelectionForeground: #ffffff;
       }
       /* Override dark-theme border colors to be visible on light background and ensure structural borders are drawn */
       #chat-viewport .border:not(button):not([role="button"]):not(a):not(code):not(pre) {
@@ -738,6 +973,10 @@ export function setSnapshotTheme(mode) {
         background: #0f0f0f !important; 
         color: #e5e5e5 !important; 
         --vscode-editorWidget-background: #0f0f0f;
+        --vscode-list-hoverBackground: rgba(255, 255, 255, 0.1);
+        --vscode-list-hoverForeground: #e5e5e5;
+        --vscode-list-activeSelectionBackground: #0078d4;
+        --vscode-list-activeSelectionForeground: #ffffff;
       }
       #chat-viewport p, #chat-viewport span, #chat-viewport div,
       #chat-viewport li, #chat-viewport h1, #chat-viewport h2,
