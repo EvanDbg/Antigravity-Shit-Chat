@@ -36,3 +36,6 @@ diagnose.mjs
 .push-subscriptions.json
 .gitnexus
 docs/
+
+# AI agent config
+.claude/
