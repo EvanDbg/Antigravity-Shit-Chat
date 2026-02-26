@@ -46,8 +46,9 @@ export function initChatView() {
     <style id="theme-override"></style>
     <div id="chat-viewport"><div class="loading">Waiting for content...</div></div>`;
 
-  // Load snapshot adaptation CSS
+  // Load snapshot adaptation CSS and Theme CSS
   loadSnapshotCSS();
+  loadChatThemeCSS();
 
   // Event delegation for CDP click passthrough (inside Shadow DOM)
   shadowRoot.addEventListener('click', handleCDPClick);
@@ -57,10 +58,13 @@ export function initChatView() {
   if (container) {
     container.addEventListener('scroll', handleScrollSync);
   }
+
+  // Ensure saved theme is applied immediately on load
+  setSnapshotTheme(getSnapshotTheme());
 }
 
 // ------------------------------------------------------------------
-// Load snapshot.css into Shadow DOM
+// Load Snapshot Adaptation & Theme CSS into Shadow DOM
 // ------------------------------------------------------------------
 async function loadSnapshotCSS() {
   try {
@@ -73,13 +77,28 @@ async function loadSnapshotCSS() {
   } catch (_) { }
 }
 
+let _themeLoading = false;
+async function loadChatThemeCSS() {
+  if (_themeLoading) return; // Reentrant guard: prevent concurrent fetches
+  _themeLoading = true;
+  try {
+    const res = await fetch(`css/chat-theme.css?v=2.5.1`);
+    if (res.ok) {
+      const css = await res.text();
+      const style = shadowRoot.getElementById('theme-override');
+      if (style) style.textContent = css;
+    }
+  } catch (_) { }
+  _themeLoading = false;
+}
+
 // ------------------------------------------------------------------
 // Apply IDE styles (fetched from server)
 // ------------------------------------------------------------------
-export async function applyCascadeStyles(id) {
+export async function applyCascadeStyles(id, signal) {
   if (!shadowRoot) return;
   try {
-    const res = await fetch(`/styles/${id}`);
+    const res = await fetch(`/styles/${id}`, { signal });
     if (!res.ok) return;
     const data = await res.json();
     if (!data) return;
@@ -98,8 +117,8 @@ export async function applyCascadeStyles(id) {
       ideStyle.textContent = `
         #chat-viewport {
           ${varDecls}
-          color: ${editorFg};
-          background: ${editorBg};
+          color: var(--theme-fc, ${editorFg});
+          background: var(--theme-bc, ${editorBg});
           font-size: 14px;
           line-height: 1.6;
         }
@@ -136,24 +155,24 @@ export async function applyCascadeStyles(id) {
 
         #cascade, #conversation, #chat {
           background: transparent !important;
-          color: ${editorFg} !important;
+          color: var(--theme-fc, ${editorFg}) !important;
         }
 
         /* Prose typography */
         #chat-viewport .prose, #chat-viewport [class*="prose"] {
-          --tw-prose-body: ${editorFg} !important;
-          --tw-prose-headings: #f3f4f6 !important;
+          --tw-prose-body: var(--theme-fc, ${editorFg}) !important;
+          --tw-prose-headings: var(--theme-heading, #f3f4f6) !important;
           --tw-prose-links: ${vars['--vscode-textLink-foreground'] || '#60a5fa'} !important;
-          --tw-prose-bold: #f3f4f6 !important;
-          --tw-prose-code: #f3f4f6 !important;
-          --tw-prose-pre-bg: #1f2937 !important;
-          color: ${editorFg} !important;
+          --tw-prose-bold: var(--theme-heading, #f3f4f6) !important;
+          --tw-prose-code: var(--theme-heading, #f3f4f6) !important;
+          --tw-prose-pre-bg: var(--theme-pre-bg, #1f2937) !important;
+          color: var(--theme-fc, ${editorFg}) !important;
         }
 
         /* Code blocks */
         #chat-viewport pre, #chat-viewport code {
-          background: #111 !important;
-          color: #ddd !important;
+          background: var(--theme-code-bg, #111) !important;
+          color: var(--theme-code-fc, #ddd) !important;
         }
         #chat-viewport pre code { background: transparent !important; }
 
@@ -181,6 +200,11 @@ export async function applyCascadeStyles(id) {
         #chat-viewport .min-h-0 { min-height: auto !important; }
       `;
     }
+
+    // Re-apply the user's preferred theme class in case DOM reconstruction dropped it
+    // or new variables need the higher specificity of the theme class to take effect
+    setSnapshotTheme(getSnapshotTheme());
+
   } catch (e) {
     console.error('CSS refresh failed:', e);
   }
@@ -334,10 +358,12 @@ let lastContentHash = '';
 let preventAutoBottomScroll = false;
 let _preventAutoBottomTimer = null;
 
-export async function updateContent(id) {
+let currentAbortController = null;
+
+export async function updateContent(id, signal) {
   if (!shadowRoot) return;
   try {
-    const res = await fetch(`/snapshot/${id}`);
+    const res = await fetch(`/snapshot/${id}`, { signal });
     if (!res.ok) return;
     const data = await res.json();
 
@@ -498,6 +524,9 @@ export async function updateContent(id) {
       const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight);
       container.scrollTop = Math.min(targetScrollTop, maxScroll);
     }
+    
+    // Re-apply theme class stripped by morphdom during HTML diffing
+    setSnapshotTheme(getSnapshotTheme());
   } catch (_) { }
 }
 
@@ -864,252 +893,29 @@ function handleScrollSync() {
 }
 
 // ------------------------------------------------------------------
-// Theme override (three-mode)
+// Theme override (three-mode) — idempotent, single source of truth
 // ------------------------------------------------------------------
 export function setSnapshotTheme(mode) {
   if (!shadowRoot) return;
+  const viewport = shadowRoot.getElementById('chat-viewport');
+  if (!viewport) return;
+
+  // Idempotency: skip if theme class already matches target
+  const currentClass = viewport.classList.contains('theme-light') ? 'light'
+    : viewport.classList.contains('theme-dark') ? 'dark' : 'follow';
+  if (currentClass === mode) return;
+
   const style = shadowRoot.getElementById('theme-override');
-  if (!style) return;
+  // Safety net: if theme CSS failed to load during init, retry once
+  if (style && style.textContent.length < 50) {
+    loadChatThemeCSS();
+  }
 
-  const baseCSS = `
-    /* === Base Mobile Resets === */
-    #chat-viewport, #chat-viewport * {
-      box-sizing: border-box !important;
-    }
-    #chat-viewport {
-      max-width: 100vw;
-      overflow-x: hidden;
-    }
-    #chat-viewport p, #chat-viewport span, #chat-viewport div {
-      word-break: break-word;
-    }
-    #chat-viewport .border, #chat-viewport input, #chat-viewport textarea, #chat-viewport .card, #chat-viewport .message {
-      max-width: 100% !important;
-    }
-
-    /* Elevate modals/dialogs/menus and their backdrops to the ultimate top */
-    #chat-viewport .fixed,
-    #chat-viewport [class*="fixed"],
-    #chat-viewport [style*="fixed"],
-    #chat-viewport .absolute,
-    #chat-viewport [class*="absolute"],
-    #chat-viewport [style*="position: absolute"] {
-      z-index: 100 !important;
-    }
-
-    /* Target specific root-level popups for forced centering safely */
-    #chat-viewport [role="menu"][style*="absolute"],
-    #chat-viewport [role="menu"][style*="fixed"],
-    #chat-viewport [role="listbox"][style*="absolute"],
-    #chat-viewport [role="listbox"][style*="fixed"],
-    #chat-viewport [role="dialog"][style*="absolute"],
-    #chat-viewport [role="dialog"][style*="fixed"],
-    #chat-viewport .popover[style*="absolute"],
-    #chat-viewport .popover[style*="fixed"],
-    #chat-viewport .context-view,
-    #chat-viewport [data-radix-popper-content-wrapper],
-    #chat-viewport .monaco-menu-container {
-      z-index: 9999 !important;
-      position: fixed !important;
-      max-width: 90vw !important;
-      max-height: 90vh !important;
-      overflow: auto !important;
-      background: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
-      border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2))) !important;
-      border-radius: 8px !important;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.2) !important;
-      color: var(--vscode-editor-foreground, CanvasText) !important;
-    }
-    
-    /* Force visibility overrides for headless UI elements that get snapshot middway through transition */
-    #chat-viewport [role="menu"][style*="visibility: visible"],
-    #chat-viewport [role="listbox"][style*="visibility: visible"],
-    #chat-viewport [role="dialog"][style*="visibility: visible"],
-    #chat-viewport .popover[style*="visibility: visible"] {
-      opacity: 1 !important;
-      pointer-events: auto !important;
-    }
-
-    /* Hide IDE internal text input parts to prevent duplicate input bars */
-    #chat-viewport .interactive-input-part,
-    #chat-viewport .chat-input-part,
-    #chat-viewport .monaco-editor.chat-input {
-      display: none !important;
-    }
-
-    /* Fix headless custom color classes from IDE Tailwind rendering */
-    #chat-viewport .bg-ide-chat-background,
-    #chat-viewport [class*="bg-ide-chat-background"] {
-      background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
-      color: var(--vscode-editor-foreground, CanvasText) !important;
-    }
-  `;
-
+  viewport.classList.remove('theme-light', 'theme-dark');
   if (mode === 'light') {
-    style.textContent = baseCSS + `
-      /* === Light Theme Override === */
-
-      /* 1. Container backgrounds */
-      #chat-viewport {
-        background: #ffffff !important;
-        color: #1f2328 !important;
-        --vscode-editorWidget-background: #ffffff;
-      }
-      #chat-viewport #cascade,
-      #chat-viewport #conversation,
-      #chat-viewport #chat {
-        background: transparent !important;
-        color: #1f2328 !important;
-      }
-
-      /* 2. Global text-decoration reset — kill IDE underlines */
-      #chat-viewport, #chat-viewport * {
-        text-decoration: none !important;
-      }
-
-      /* 2b. Text color — inherit from parent */
-      #chat-viewport p, #chat-viewport span, #chat-viewport div,
-      #chat-viewport li, #chat-viewport td, #chat-viewport th,
-      #chat-viewport label { color: inherit !important; }
-      
-      /* Restore background for sticky/fixed headers */
-      #chat-viewport .sticky,
-      #chat-viewport [class*="sticky"],
-      #chat-viewport [style*="sticky"] {
-        background-color: var(--bg-primary, #ffffff) !important;
-        z-index: 10 !important;
-      }
-
-      /* 3. Links — remove underlines, set visible link color */
-      #chat-viewport a {
-        color: #0969da !important;
-        text-decoration: none !important;
-      }
-      #chat-viewport a:hover {
-        text-decoration: underline !important;
-      }
-
-      /* 4. Headings — bold, slightly darker, larger */
-      #chat-viewport h1, #chat-viewport h2, #chat-viewport h3,
-      #chat-viewport h4, #chat-viewport h5, #chat-viewport h6 {
-        color: #000000 !important;
-        font-weight: 600 !important;
-      }
-
-      /* 5. Prose typography */
-      #chat-viewport .prose, #chat-viewport [class*="prose"] {
-        --tw-prose-body: #1f2328 !important;
-        --tw-prose-headings: #000000 !important;
-        --tw-prose-bold: #000000 !important;
-        --tw-prose-code: #1f2328 !important;
-        --tw-prose-pre-bg: #f0f2f5 !important;
-        --tw-prose-links: #0969da !important;
-        color: #1f2328 !important;
-      }
-
-      /* 6. Code blocks — visible background, border, proper contrast */
-      #chat-viewport pre {
-        background: #f0f2f5 !important;
-        color: #1f2328 !important;
-        border: 1px solid #d0d4da !important;
-        border-radius: 6px !important;
-        padding: 12px !important;
-      }
-      #chat-viewport pre code {
-        background: transparent !important;
-        color: inherit !important;
-        border: none !important;
-        padding: 0 !important;
-      }
-      #chat-viewport code {
-        background: #e3e6ea !important;
-        color: #1f2328 !important;
-        border: 1px solid #d0d4da !important;
-        border-radius: 4px !important;
-        padding: 1px 5px !important;
-        font-size: 0.9em !important;
-      }
-
-      /* 7. Tables — visible borders */
-      #chat-viewport table {
-        border-collapse: collapse !important;
-        border: 1px solid #d0d4da !important;
-      }
-      #chat-viewport th, #chat-viewport td {
-        border: 1px solid #d0d4da !important;
-        padding: 6px 12px !important;
-      }
-      #chat-viewport th {
-        background: #f0f2f5 !important;
-        font-weight: 600 !important;
-      }
-
-      /* 8. Borders, dividers, separators — match IDE visual structure */
-      #chat-viewport hr {
-        border-color: #d0d4da !important;
-      }
-      /* Override IDE border CSS variables for light visibility */
-      #chat-viewport {
-        --vscode-panel-border: #e0e3e8;
-        --vscode-widget-border: #e0e3e8;
-        --vscode-editorGroup-border: #e0e3e8;
-        --vscode-sideBar-border: #e0e3e8;
-        --vscode-contrastBorder: #e0e3e8;
-        --vscode-editorWidget-border: #e0e3e8;
-        --vscode-input-border: #e0e3e8;
-        --vscode-focusBorder: #0969da;
-        --vscode-list-hoverBackground: rgba(0, 0, 0, 0.08);
-        --vscode-list-hoverForeground: #1f2328;
-        --vscode-list-activeSelectionBackground: #0969da;
-        --vscode-list-activeSelectionForeground: #ffffff;
-      }
-      /* Override dark-theme border colors to be visible on light background and ensure structural borders are drawn */
-      #chat-viewport .border:not(button):not([role="button"]):not(a):not(code):not(pre) {
-        border-width: 1px !important;
-        border-style: solid !important;
-        border-color: #e0e3e8 !important;
-      }
-      /* NOTE: Tailwind border-t/b/l/r and sash overrides live in snapshot.css (Shadow DOM scope) */
-
-      /* 9. Badges, special tags — keep slightly tinted bg */
-      #chat-viewport [class*="badge"],
-      #chat-viewport [class*="tag"],
-      #chat-viewport [class*="chip"] {
-        background: #e8ebef !important;
-        color: #1f2328 !important;
-        border: 1px solid #d0d4da !important;
-      }
-
-      /* 10. SVG icons — ensure visibility */
-      #chat-viewport svg {
-        color: inherit !important;
-      }
-
-      /* 11. Wide content — allow horizontal scrolling */
-      #chat-viewport pre,
-      #chat-viewport table {
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
-      }
-    `;
+    viewport.classList.add('theme-light');
   } else if (mode === 'dark') {
-    style.textContent = baseCSS + `
-      #chat-viewport { 
-        background: #0f0f0f !important; 
-        color: #e5e5e5 !important; 
-        --vscode-editorWidget-background: #0f0f0f;
-        --vscode-list-hoverBackground: rgba(255, 255, 255, 0.1);
-        --vscode-list-hoverForeground: #e5e5e5;
-        --vscode-list-activeSelectionBackground: #0078d4;
-        --vscode-list-activeSelectionForeground: #ffffff;
-      }
-      #chat-viewport p, #chat-viewport span, #chat-viewport div,
-      #chat-viewport li, #chat-viewport h1, #chat-viewport h2,
-      #chat-viewport h3, #chat-viewport a { color: inherit !important; }
-    `;
-  } else {
-    // 'follow' — let IDE theme drive colors BUT apply mobile resets
-    style.textContent = baseCSS;
+    viewport.classList.add('theme-dark');
   }
 
   localStorage.setItem('snapshot-theme', mode);
@@ -1122,10 +928,22 @@ export function getSnapshotTheme() {
 // ------------------------------------------------------------------
 // Listen for app events
 // ------------------------------------------------------------------
+document.addEventListener('theme-toggle', (e) => {
+  setSnapshotTheme(e.detail.mode);
+});
+
 document.addEventListener('cascade-selected', (e) => {
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+  const signal = currentAbortController.signal;
+
   currentId = e.detail.id;
-  applyCascadeStyles(currentId);
-  updateContent(currentId);
+  
+  // 切换实例时，重置 hash，强制触发内容更新和滚动到底部（最新消息位置）行为
+  lastContentHash = '';
+  
+  applyCascadeStyles(currentId, signal);
+  updateContent(currentId, signal);
 
   // Restore saved theme
   setSnapshotTheme(getSnapshotTheme());

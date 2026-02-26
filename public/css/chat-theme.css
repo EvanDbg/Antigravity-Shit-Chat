@@ -1,0 +1,228 @@
+/* === Base Mobile Resets === */
+#chat-viewport, #chat-viewport * {
+  box-sizing: border-box !important;
+}
+#chat-viewport {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+#chat-viewport p, #chat-viewport span, #chat-viewport div {
+  word-break: break-word;
+}
+#chat-viewport .border, #chat-viewport input, #chat-viewport textarea, #chat-viewport .card, #chat-viewport .message {
+  max-width: 100% !important;
+}
+
+/* Elevate modals/dialogs/menus and their backdrops to the ultimate top */
+#chat-viewport .fixed,
+#chat-viewport [class*="fixed"],
+#chat-viewport [style*="fixed"],
+#chat-viewport .absolute,
+#chat-viewport [class*="absolute"],
+#chat-viewport [style*="position: absolute"] {
+  z-index: 100 !important;
+}
+
+/* Push standard inline content (code blocks, text, monaco instances) lower so they don't pierce popups */
+#chat-viewport .monaco-editor,
+#chat-viewport .editor-instance,
+#chat-viewport .mac,
+#chat-viewport code,
+#chat-viewport pre,
+#chat-viewport .token,
+#chat-viewport .mtk1, #chat-viewport [class*="mtk"] {
+  position: relative;
+  z-index: 1 !important;
+}
+
+/* Target specific root-level popups for forced centering safely */
+#chat-viewport [role="menu"],
+#chat-viewport [role="listbox"],
+#chat-viewport [role="dialog"],
+#chat-viewport .monaco-dialog-box,
+#chat-viewport .monaco-dialog-container,
+#chat-viewport .popover,
+#chat-viewport .context-view,
+#chat-viewport [data-radix-popper-content-wrapper],
+#chat-viewport .monaco-menu-container {
+  z-index: 2147483647 !important;
+  position: fixed !important;
+  max-width: 90vw !important;
+  max-height: 90vh !important;
+  overflow: auto !important;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2))) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+  color: var(--vscode-editor-foreground, CanvasText) !important;
+}
+
+/* Force visibility overrides for headless UI elements that get snapshot middway through transition */
+#chat-viewport [role="menu"][style*="visibility: visible"],
+#chat-viewport [role="listbox"][style*="visibility: visible"],
+#chat-viewport [role="dialog"][style*="visibility: visible"],
+#chat-viewport .popover[style*="visibility: visible"] {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Hide IDE internal text input parts to prevent duplicate input bars */
+#chat-viewport .interactive-input-part,
+#chat-viewport .chat-input-part,
+#chat-viewport .monaco-editor.chat-input {
+  display: none !important;
+}
+
+/* Fix headless custom color classes from IDE Tailwind rendering */
+#chat-viewport .bg-ide-chat-background,
+#chat-viewport [class*="bg-ide-chat-background"] {
+  background-color: var(--vscode-editorWidget-background, var(--vscode-editor-background, Canvas)) !important;
+  color: var(--vscode-editor-foreground, CanvasText) !important;
+}
+
+/* =========================================
+   Light Theme Override (.theme-light class)
+   ========================================= */
+
+#chat-viewport.theme-light {
+  background: #ffffff !important;
+  color: #1f2328 !important;
+  --vscode-editorWidget-background: #ffffff;
+  --vscode-panel-border: #e0e3e8;
+  --vscode-widget-border: #e0e3e8;
+  --vscode-editorGroup-border: #e0e3e8;
+  --vscode-sideBar-border: #e0e3e8;
+  --vscode-contrastBorder: #e0e3e8;
+  --vscode-editorWidget-border: #e0e3e8;
+  --vscode-input-border: #e0e3e8;
+  --vscode-focusBorder: #0969da;
+  --vscode-list-hoverBackground: rgba(0, 0, 0, 0.08);
+  --vscode-list-hoverForeground: #1f2328;
+  --vscode-list-activeSelectionBackground: #0969da;
+  --vscode-list-activeSelectionForeground: #ffffff;
+}
+#chat-viewport.theme-light #cascade,
+#chat-viewport.theme-light #conversation,
+#chat-viewport.theme-light #chat {
+  background: transparent !important;
+  color: #1f2328 !important;
+}
+
+#chat-viewport.theme-light, #chat-viewport.theme-light * {
+  text-decoration: none !important;
+}
+
+#chat-viewport.theme-light p, #chat-viewport.theme-light span, #chat-viewport.theme-light div,
+#chat-viewport.theme-light li, #chat-viewport.theme-light td, #chat-viewport.theme-light th,
+#chat-viewport.theme-light label { color: inherit !important; }
+
+#chat-viewport.theme-light .sticky,
+#chat-viewport.theme-light [class*="sticky"],
+#chat-viewport.theme-light [style*="sticky"] {
+  background-color: var(--bg-primary, #ffffff) !important;
+  z-index: 10 !important;
+}
+
+#chat-viewport.theme-light a {
+  color: #0969da !important;
+  text-decoration: none !important;
+}
+#chat-viewport.theme-light a:hover {
+  text-decoration: underline !important;
+}
+
+#chat-viewport.theme-light h1, #chat-viewport.theme-light h2, #chat-viewport.theme-light h3,
+#chat-viewport.theme-light h4, #chat-viewport.theme-light h5, #chat-viewport.theme-light h6 {
+  color: #000000 !important;
+  font-weight: 600 !important;
+}
+
+#chat-viewport.theme-light .prose, #chat-viewport.theme-light [class*="prose"] {
+  --tw-prose-body: #1f2328 !important;
+  --tw-prose-headings: #000000 !important;
+  --tw-prose-bold: #000000 !important;
+  --tw-prose-code: #1f2328 !important;
+  --tw-prose-pre-bg: #f0f2f5 !important;
+  --tw-prose-links: #0969da !important;
+  color: #1f2328 !important;
+}
+
+#chat-viewport.theme-light pre {
+  background: #f0f2f5 !important;
+  color: #1f2328 !important;
+  border: 1px solid #d0d4da !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+}
+#chat-viewport.theme-light pre code {
+  background: transparent !important;
+  color: inherit !important;
+  border: none !important;
+  padding: 0 !important;
+}
+#chat-viewport.theme-light code {
+  background: #e3e6ea !important;
+  color: #1f2328 !important;
+  border: 1px solid #d0d4da !important;
+  border-radius: 4px !important;
+  padding: 1px 5px !important;
+  font-size: 0.9em !important;
+}
+
+#chat-viewport.theme-light table {
+  border-collapse: collapse !important;
+  border: 1px solid #d0d4da !important;
+}
+#chat-viewport.theme-light th, #chat-viewport.theme-light td {
+  border: 1px solid #d0d4da !important;
+  padding: 6px 12px !important;
+}
+#chat-viewport.theme-light th {
+  background: #f0f2f5 !important;
+  font-weight: 600 !important;
+}
+
+#chat-viewport.theme-light hr {
+  border-color: #d0d4da !important;
+}
+
+#chat-viewport.theme-light .border:not(button):not([role="button"]):not(a):not(code):not(pre) {
+  border-width: 1px !important;
+  border-style: solid !important;
+  border-color: #e0e3e8 !important;
+}
+
+#chat-viewport.theme-light [class*="badge"],
+#chat-viewport.theme-light [class*="tag"],
+#chat-viewport.theme-light [class*="chip"] {
+  background: #e8ebef !important;
+  color: #1f2328 !important;
+  border: 1px solid #d0d4da !important;
+}
+
+#chat-viewport.theme-light svg {
+  color: inherit !important;
+}
+
+#chat-viewport.theme-light pre,
+#chat-viewport.theme-light table {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+
+/* =========================================
+   Dark Theme Override (.theme-dark class)
+   ========================================= */
+
+#chat-viewport.theme-dark {
+  background: #0f0f0f !important;
+  color: #e5e5e5 !important;
+  --vscode-editorWidget-background: #0f0f0f;
+  --vscode-list-hoverBackground: rgba(255, 255, 255, 0.1);
+  --vscode-list-hoverForeground: #e5e5e5;
+  --vscode-list-activeSelectionBackground: #0078d4;
+  --vscode-list-activeSelectionForeground: #ffffff;
+}
+#chat-viewport.theme-dark p, #chat-viewport.theme-dark span, #chat-viewport.theme-dark div,
+#chat-viewport.theme-dark li, #chat-viewport.theme-dark h1, #chat-viewport.theme-dark h2,
+#chat-viewport.theme-dark h3, #chat-viewport.theme-dark a { color: inherit !important; }
