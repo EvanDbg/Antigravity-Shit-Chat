@@ -11,6 +11,7 @@ let scrollSyncLock = false;
 let lastClickEvent = null;
 let lastClickTime = 0;
 let lastDismissTime = 0; // Debounce lock to prevent ghost re-open after user closes bubble
+let lastRenderedPopupFingerprint = ''; // Content fingerprint to prevent re-rendering the same popup
 window.addEventListener('click', (e) => {
     lastClickEvent = e;
     lastClickTime = Date.now();
@@ -237,8 +238,18 @@ export async function updateContent(id) {
     // Core Logic: Bubble Popup Renderer (Outside Shadow DOM)
     // =========================================================================
     function renderPopupBubble(nativePopup) {
+        // Guard: only render if user has actually clicked something recently.
+        // This prevents auto-popup on page load when IDE snapshot contains a stale dialog.
+        if (lastClickTime === 0 || (Date.now() - lastClickTime > 3000)) return;
+
         // Anti-ghost: refuse to render if user just dismissed a popup
         if (Date.now() - lastDismissTime < 2000) return;
+
+        // Content fingerprint: skip if same popup is being re-rendered without new click
+        const fingerprint = (nativePopup.textContent || '').trim().substring(0, 200);
+        if (fingerprint === lastRenderedPopupFingerprint && (Date.now() - lastClickTime > 1000)) return;
+        if (!fingerprint) return; // empty popup, skip
+        lastRenderedPopupFingerprint = fingerprint;
 
         let overlay = document.getElementById('mobile-popup-overlay');
         if (!overlay) {
@@ -356,7 +367,7 @@ export async function updateContent(id) {
       // ===== DOM EXTRACTION & NOISE REDUCTION =====
       // Intercept specific popup containers before morphdom merges them.
       // E.g. VSCode renders dropdowns at root level with specific classes/roles.
-      const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], [role="listbox"], .monaco-menu-container, [role="menu"][style*="fixed"]'));
+      const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], [role="listbox"], [role="menu"], .monaco-menu-container, .context-view'));
       let extractedPopup = null;
 
       // Only attempt to process if the popup contains identifiable CDP options

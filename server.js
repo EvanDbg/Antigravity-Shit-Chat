@@ -1596,7 +1596,7 @@ async function main() {
                             console.error('Delayed capture failed after click:', err);
                         }
                     }
-                }, 150);
+                }, 300);
 
             } else {
                 res.status(500).json({ error: val?.reason || 'click failed' });
