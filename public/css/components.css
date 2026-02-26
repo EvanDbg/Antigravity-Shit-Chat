@@ -557,7 +557,7 @@
 }
 
 .mobile-popup-item {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.1);
   cursor: pointer;
 }
@@ -571,8 +571,8 @@
 .mobile-popup-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  gap: 6px;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -586,9 +586,9 @@
 }
 
 .mobile-popup-desc {
-  font-size: 13px;
+  font-size: 11px;
   opacity: 0.65;
-  margin-top: 4px;
+  margin-top: 2px;
   line-height: 1.3;
 }
 

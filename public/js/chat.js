@@ -10,6 +10,7 @@ let scrollSyncLock = false;
 // Global click interceptor to track interaction coordinates for popup positioning
 let lastClickEvent = null;
 let lastClickTime = 0;
+let lastDismissTime = 0; // Debounce lock to prevent ghost re-open after user closes bubble
 window.addEventListener('click', (e) => {
     lastClickEvent = e;
     lastClickTime = Date.now();
@@ -236,6 +237,9 @@ export async function updateContent(id) {
     // Core Logic: Bubble Popup Renderer (Outside Shadow DOM)
     // =========================================================================
     function renderPopupBubble(nativePopup) {
+        // Anti-ghost: refuse to render if user just dismissed a popup
+        if (Date.now() - lastDismissTime < 2000) return;
+
         let overlay = document.getElementById('mobile-popup-overlay');
         if (!overlay) {
             overlay = document.createElement('div');
@@ -243,9 +247,8 @@ export async function updateContent(id) {
             overlay.className = 'mobile-popup-backdrop';
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
-                    overlay.dataset.autoClose = 'false'; // prevent aggressive re-closing by immediate snapshot
+                    lastDismissTime = Date.now();
                     overlay.remove();
-                    // trigger dismiss
                     fetch(`/dismiss/${currentId}`, { method: 'POST' }).catch(()=>{});
                 }
             });
@@ -292,7 +295,8 @@ export async function updateContent(id) {
             // Bind click to the native CDP element's ID
             itemEl.addEventListener('click', () => {
                 const cdpId = opt.getAttribute('data-cdp-click');
-                overlay.remove(); // immediate visual feedback
+                lastDismissTime = Date.now(); // prevent ghost re-open from delayed snapshot
+                overlay.remove();
                 fetch(`/click/${currentId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -352,7 +356,7 @@ export async function updateContent(id) {
       // ===== DOM EXTRACTION & NOISE REDUCTION =====
       // Intercept specific popup containers before morphdom merges them.
       // E.g. VSCode renders dropdowns at root level with specific classes/roles.
-      const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], .monaco-menu-container, [role="menu"][style*="fixed"]'));
+      const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], [role="listbox"], .monaco-menu-container, [role="menu"][style*="fixed"]'));
       let extractedPopup = null;
 
       // Only attempt to process if the popup contains identifiable CDP options
@@ -386,9 +390,9 @@ export async function updateContent(id) {
       if (extractedPopup) {
           renderPopupBubble(extractedPopup);
       } else {
-          // No popup in new DOM = close any existing Bubbles
+          // No popup in new DOM = close any existing Bubbles (but respect dismiss debounce)
           const existingBubble = document.getElementById('mobile-popup-overlay');
-          if (existingBubble && existingBubble.dataset.autoClose !== 'false') {
+          if (existingBubble && (Date.now() - lastDismissTime > 500)) {
               existingBubble.remove();
           }
       }
