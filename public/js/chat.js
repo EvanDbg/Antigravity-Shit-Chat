@@ -243,7 +243,10 @@ function showPopupBubble(items, clickX, clickY) {
         itemEl.innerHTML = html;
 
         itemEl.addEventListener('click', () => {
-            dismissPopupBubble();
+            // Only remove the overlay — do NOT send /dismiss here
+            // The server-side /popup-click will handle the IDE popup
+            const overlay = document.getElementById('mobile-popup-overlay');
+            if (overlay) overlay.remove();
             if (item.title) {
                 fetch(`/popup-click/${currentId}`, {
                     method: 'POST',

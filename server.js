@@ -1888,20 +1888,56 @@ async function main() {
             const locateResult = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
                   const targetText = ${JSON.stringify(title)};
-                  // Search [role=option] (HeadlessUI listbox) — popup should still be open
-                  const options = document.querySelectorAll('[role="option"]');
-                  for (const opt of options) {
-                    const t = (opt.textContent || '').trim();
-                    if (t === targetText) {
-                      const rect = opt.getBoundingClientRect();
-                      if (rect.height > 0 && rect.top >= 0 && rect.top < window.innerHeight) {
-                        return { ok: true, text: t, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                  
+                  // Find the visible popup container (dialog or listbox)
+                  // Iterate from LAST to FIRST — newly opened popups are appended at the end
+                  const containers = Array.from(document.querySelectorAll('[role="dialog"], [role="listbox"]'));
+                  let activeContainer = null;
+                  let bestContainer = null; // container whose text contains the target
+                  
+                  for (let i = containers.length - 1; i >= 0; i--) {
+                    const c = containers[i];
+                    const style = window.getComputedStyle(c);
+                    if (style.display === 'none' || style.visibility === 'hidden') continue;
+                    if (c.getBoundingClientRect().height === 0) continue;
+                    
+                    // Prefer the container whose text includes the target
+                    if (!bestContainer && (c.textContent || '').includes(targetText)) {
+                      bestContainer = c;
+                    }
+                    if (!activeContainer) activeContainer = c; // last visible = most recently opened
+                  }
+                  
+                  activeContainer = bestContainer || activeContainer;
+                  
+                  if (!activeContainer) {
+                    return { ok: false, reason: 'no visible container', optCount: 0, optTexts: [] };
+                  }
+                  
+                  const role = activeContainer.getAttribute('role');
+                  
+                  // Search within the container based on type
+                  if (role === 'listbox') {
+                    // HeadlessUI listbox — search [role=option] within
+                    const options = activeContainer.querySelectorAll('[role="option"]');
+                    for (const opt of options) {
+                      const t = (opt.textContent || '').trim();
+                      if (t === targetText) {
+                        const rect = opt.getBoundingClientRect();
+                        if (rect.height > 0 && rect.top >= 0 && rect.top < window.innerHeight) {
+                          return { ok: true, text: t, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                        }
                       }
                     }
+                    return { ok: false, optCount: options.length, optTexts: Array.from(options).slice(0, 5).map(o => (o.textContent||'').trim().substring(0,30)) };
                   }
-                  // Also search dialog items (non-listbox popups)
-                  const items = document.querySelectorAll('[role="menuitem"], [role="dialog"] li[class*="cursor-pointer"], [role="dialog"] div[class*="cursor-pointer"]');
-                  for (const item of items) {
+                  
+                  // Dialog — search interactive items within
+                  const candidates = activeContainer.querySelectorAll(
+                    'div[class*="cursor-pointer"], div[class*="hover:"], button, ' +
+                    '[role="option"], [role="menuitem"], li'
+                  );
+                  for (const item of candidates) {
                     const t = (item.textContent || '').trim();
                     if (t === targetText) {
                       const rect = item.getBoundingClientRect();
@@ -1910,7 +1946,19 @@ async function main() {
                       }
                     }
                   }
-                  return { ok: false, optCount: options.length, optTexts: Array.from(options).slice(0, 5).map(o => (o.textContent||'').trim().substring(0,30)) };
+                  
+                  // Fallback: partial text match within the dialog
+                  for (const item of candidates) {
+                    const t = (item.textContent || '').trim();
+                    if (t.includes(targetText) || targetText.includes(t)) {
+                      const rect = item.getBoundingClientRect();
+                      if (rect.height > 0 && t.length < 200) {
+                        return { ok: true, text: t, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, partial: true };
+                      }
+                    }
+                  }
+                  
+                  return { ok: false, optCount: candidates.length, optTexts: Array.from(candidates).slice(0, 5).map(o => (o.textContent||'').trim().substring(0,30)) };
                 })()`,
                 returnByValue: true,
                 contextId: c.cdp.rootContextId
