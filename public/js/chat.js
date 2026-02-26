@@ -9,8 +9,10 @@ let scrollSyncLock = false;
 
 // Global click interceptor to track interaction coordinates for popup positioning
 let lastClickEvent = null;
+let lastClickTime = 0;
 window.addEventListener('click', (e) => {
     lastClickEvent = e;
+    lastClickTime = Date.now();
 }, true);
 
 let scrollTimer = null;
@@ -309,7 +311,7 @@ export async function updateContent(id) {
         let clickY = window.innerHeight / 2;
         let fromClick = false;
 
-        if (lastClickEvent && (Date.now() - lastClickEvent.timeStamp < 2000)) {
+        if (lastClickEvent && (Date.now() - lastClickTime < 2000)) {
             // Only use click event if it's very recent (less than 2s ago)
             clickX = lastClickEvent.clientX;
             clickY = lastClickEvent.clientY;
@@ -355,6 +357,9 @@ export async function updateContent(id) {
 
       // Only attempt to process if the popup contains identifiable CDP options
       nativePopups.forEach(popup => {
+          const style = popup.getAttribute('style') || '';
+          if (style.includes('display: none') || style.includes('visibility: hidden')) return;
+
           const clickableItems = Array.from(popup.querySelectorAll('[data-cdp-click]'));
           if (clickableItems.length > 0) {
               // Valid popup! Extract it so morphdom doesn't render the raw messy version in Shadow DOM
