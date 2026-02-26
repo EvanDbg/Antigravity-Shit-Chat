@@ -82,7 +82,7 @@ async function loadChatThemeCSS() {
   if (_themeLoading) return; // Reentrant guard: prevent concurrent fetches
   _themeLoading = true;
   try {
-    const res = await fetch(`css/chat-theme.css?v=2.5.1`);
+    const res = await fetch(`css/chat-theme.css?v=2.5.2`);
     if (res.ok) {
       const css = await res.text();
       const style = shadowRoot.getElementById('theme-override');

@@ -1,6 +1,6 @@
 {
     "name": "ag-mobile-monitor",
-    "version": "2.5.1",
+    "version": "2.5.2",
     "type": "module",
     "description": "Mobile web interface for monitoring Antigravity chat via visual snapshots",
     "scripts": {
