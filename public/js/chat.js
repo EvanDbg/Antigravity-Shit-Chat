@@ -9,12 +9,8 @@ let scrollSyncLock = false;
 
 // Global click interceptor to track interaction coordinates for popup positioning
 let lastClickEvent = null;
-let lastClickTime = 0;
-let lastDismissTime = 0; // Debounce lock to prevent ghost re-open after user closes bubble
-let lastRenderedPopupFingerprint = ''; // Content fingerprint to prevent re-rendering the same popup
 window.addEventListener('click', (e) => {
     lastClickEvent = e;
-    lastClickTime = Date.now();
 }, true);
 
 let scrollTimer = null;
@@ -191,6 +187,144 @@ export async function applyCascadeStyles(id) {
 }
 
 // ------------------------------------------------------------------
+// Popup Bubble System (Decoupled from morphdom — uses dedicated /popup API)
+// ------------------------------------------------------------------
+
+// Prepare overlay for popup (no visible loading state)
+function preparePopupOverlay() {
+    dismissPopupBubble();
+    const overlay = document.createElement('div');
+    overlay.id = 'mobile-popup-overlay';
+    overlay.className = 'mobile-popup-backdrop';
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) dismissPopupBubble();
+    });
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+// Show popup bubble with items from the /popup API
+function showPopupBubble(items, clickX, clickY) {
+    const overlay = document.getElementById('mobile-popup-overlay');
+    if (!overlay) return;
+
+    if (!items || items.length === 0) {
+        dismissPopupBubble();
+        return;
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'mobile-popup-bubble';
+    overlay.appendChild(bubble);
+
+    // Render optional header (e.g. "Conversation mode")
+    if (items[0] && items[0].header) {
+        const headerEl = document.createElement('div');
+        headerEl.className = 'mobile-popup-header';
+        headerEl.textContent = items[0].header;
+        bubble.appendChild(headerEl);
+    }
+
+    items.forEach(item => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'mobile-popup-item';
+        if (item.checked) itemEl.classList.add('mobile-popup-item-checked');
+
+        let html = `<div class="mobile-popup-title"><span>${escapeHtml(item.title)}</span>`;
+        if (item.badges && item.badges.length > 0) {
+            html += `<span class="mobile-popup-badge">${escapeHtml(item.badges.join(' '))}</span>`;
+        }
+        html += `</div>`;
+
+        if (item.description) {
+            html += `<div class="mobile-popup-desc">${escapeHtml(item.description)}</div>`;
+        }
+
+        itemEl.innerHTML = html;
+
+        itemEl.addEventListener('click', () => {
+            dismissPopupBubble();
+            if (item.title) {
+                fetch(`/popup-click/${currentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: item.title })
+                }).catch(() => {});
+            }
+        });
+
+        bubble.appendChild(itemEl);
+    });
+
+    positionBubble(bubble, clickX, clickY);
+}
+
+// Dismiss any visible popup bubble
+function dismissPopupBubble() {
+    const overlay = document.getElementById('mobile-popup-overlay');
+    if (overlay) {
+        overlay.remove();
+        // Close the IDE popup that was left open during extraction
+        if (currentId) fetch(`/dismiss/${currentId}`, { method: 'POST' }).catch(() => {});
+    }
+}
+
+// Position a bubble element at the given click coordinates
+function positionBubble(bubble, clickX, clickY) {
+    requestAnimationFrame(() => {
+        const bRect = bubble.getBoundingClientRect();
+        let left = clickX - (bRect.width / 2);
+        left = Math.max(16, Math.min(window.innerWidth - bRect.width - 16, left));
+        bubble.style.left = left + 'px';
+
+        const spaceBelow = window.innerHeight - clickY;
+        if (spaceBelow >= (bRect.height + 20)) {
+            bubble.style.top = (clickY + 12) + 'px';
+            bubble.classList.add('arrow-up');
+        } else {
+            bubble.style.top = (clickY - bRect.height - 12) + 'px';
+            bubble.classList.add('arrow-down');
+        }
+    });
+}
+
+// Check if a CDP element is likely a popup trigger (dropdown, select, mode button)
+function isPopupTrigger(el) {
+    const tag = el.tagName.toUpperCase();
+    const role = el.getAttribute('role') || '';
+    const cls = (el.className || '').toLowerCase();
+    const text = (el.textContent || '').trim();
+
+    // Explicit dropdown/select elements
+    if (tag === 'SELECT' || tag === 'VSCODE-DROPDOWN') return true;
+    if (/combobox|listbox/.test(role)) return true;
+
+    // Class-based detection
+    if (/dropdown|select|picker|combobox|trigger/i.test(cls)) return true;
+
+    // IDE bottom-bar: buttons with `select-none` class are typically model/mode selectors
+    if (/select-none/i.test(cls) && text.length < 50) return true;
+
+    // Known model/mode text patterns (short text that matches known items)
+    const knownTriggerTexts = /^(planning|fast|normal|gemini|claude|gpt|o1|o3|o4|always run|ask first|never)/i;
+    if (text.length < 40 && knownTriggerTexts.test(text)) return true;
+
+    // Check for headlessui listbox buttons or aria-haspopup
+    if (el.getAttribute('aria-haspopup') === 'listbox' || el.getAttribute('aria-haspopup') === 'true') return true;
+    if (el.id && /headlessui-listbox-button/.test(el.id)) return true;
+
+    // Walk up to parent button to check headlessui or aria attributes
+    const parent = el.parentElement;
+    if (parent) {
+        if (parent.getAttribute('aria-haspopup') === 'listbox' || parent.getAttribute('aria-haspopup') === 'true') return true;
+        if (parent.id && /headlessui-listbox-button/.test(parent.id)) return true;
+        if (/combobox|listbox/.test(parent.getAttribute('role') || '')) return true;
+    }
+
+    return false;
+}
+
+// ------------------------------------------------------------------
 // Update content with morphdom diff
 // ------------------------------------------------------------------
 let lastContentHash = '';
@@ -234,160 +368,19 @@ export async function updateContent(id) {
       }
     }
 
-    // =========================================================================
-    // Core Logic: Bubble Popup Renderer (Outside Shadow DOM)
-    // =========================================================================
-    function renderPopupBubble(nativePopup) {
-        // Guard: only render if user has actually clicked something recently.
-        // This prevents auto-popup on page load when IDE snapshot contains a stale dialog.
-        if (lastClickTime === 0 || (Date.now() - lastClickTime > 3000)) return;
-
-        // Anti-ghost: refuse to render if user just dismissed a popup
-        if (Date.now() - lastDismissTime < 2000) return;
-
-        // Content fingerprint: skip if same popup is being re-rendered without new click
-        const fingerprint = (nativePopup.textContent || '').trim().substring(0, 200);
-        if (fingerprint === lastRenderedPopupFingerprint && (Date.now() - lastClickTime > 1000)) return;
-        if (!fingerprint) return; // empty popup, skip
-        lastRenderedPopupFingerprint = fingerprint;
-
-        let overlay = document.getElementById('mobile-popup-overlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'mobile-popup-overlay';
-            overlay.className = 'mobile-popup-backdrop';
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    lastDismissTime = Date.now();
-                    overlay.remove();
-                    fetch(`/dismiss/${currentId}`, { method: 'POST' }).catch(()=>{});
-                }
-            });
-            document.body.appendChild(overlay);
-        }
-        
-        overlay.innerHTML = '';
-        
-        const bubble = document.createElement('div');
-        bubble.className = 'mobile-popup-bubble';
-        
-        // --- Smart Content Extraction ---
-        const options = Array.from(nativePopup.querySelectorAll('[data-cdp-click]'));
-        options.forEach((opt, index) => {
-            const rawTextLines = (opt.textContent || '').trim().split('\n').map(l => l.trim()).filter(Boolean);
-            if(rawTextLines.length === 0) return;
-            
-            // Try to separate title / new badge / description
-            let title = rawTextLines[0];
-            let description = '';
-            let badges = [];
-            
-            rawTextLines.slice(1).forEach(line => {
-                if(line.toLowerCase() === 'new') badges.push(line);
-                else description += line + ' ';
-            });
-
-            // Reconstruct clean HTML
-            const itemEl = document.createElement('div');
-            itemEl.className = 'mobile-popup-item';
-            
-            let html = `<div class="mobile-popup-title"><span>${escapeHtml(title)}</span>`;
-            if (badges.length > 0) {
-                html += `<span class="mobile-popup-badge">${escapeHtml(badges.join(' '))}</span>`;
-            }
-            html += `</div>`;
-            
-            if (description) {
-                html += `<div class="mobile-popup-desc">${escapeHtml(description.trim())}</div>`;
-            }
-            
-            itemEl.innerHTML = html;
-            
-            // Bind click to the native CDP element's ID
-            itemEl.addEventListener('click', () => {
-                const cdpId = opt.getAttribute('data-cdp-click');
-                lastDismissTime = Date.now(); // prevent ghost re-open from delayed snapshot
-                overlay.remove();
-                fetch(`/click/${currentId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ index: parseInt(cdpId) })
-                }).catch(()=>{});
-            });
-            
-            bubble.appendChild(itemEl);
-        });
-
-        overlay.appendChild(bubble);
-
-        // --- Smart Positioning (Coordinate Hijacking) ---
-        // Find click coordinates, fallback to center
-        let clickX = window.innerWidth / 2;
-        let clickY = window.innerHeight / 2;
-        let fromClick = false;
-
-        if (lastClickEvent && (Date.now() - lastClickTime < 2000)) {
-            // Only use click event if it's very recent (less than 2s ago)
-            clickX = lastClickEvent.clientX;
-            clickY = lastClickEvent.clientY;
-            fromClick = true;
-        }
-
-        // Delay positioning slightly to let DOM calculate bubble height
-        requestAnimationFrame(() => {
-            if (!fromClick) {
-                bubble.style.top = '50%';
-                bubble.style.left = '50%';
-                bubble.style.transform = 'translate(-50%, -50%)';
-                return;
-            }
-
-            const bRect = bubble.getBoundingClientRect();
-            // Position horizontally (bounded by screen width)
-            let left = clickX - (bRect.width / 2);
-            left = Math.max(16, Math.min(window.innerWidth - bRect.width - 16, left));
-            
-            bubble.style.left = left + 'px';
-
-            // Position vertically - check if it fits below
-            const spaceBelow = window.innerHeight - clickY;
-            if (spaceBelow >= (bRect.height + 20)) {
-                // Drop down
-                bubble.style.top = (clickY + 12) + 'px';
-                bubble.classList.add('arrow-up');
-            } else {
-                // Pop up
-                bubble.style.top = (clickY - bRect.height - 12) + 'px';
-                bubble.classList.add('arrow-down');
-            }
-        });
-    }
 
     if (morphdom) {
-      // ===== DOM EXTRACTION & NOISE REDUCTION =====
-      // Intercept specific popup containers before morphdom merges them.
-      // E.g. VSCode renders dropdowns at root level with specific classes/roles.
+      // ===== DOM NOISE REDUCTION =====
+      // Strip popup containers from snapshot before morphdom to avoid rendering stale popups
       const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], [role="listbox"], [role="menu"], .monaco-menu-container, .context-view'));
-      let extractedPopup = null;
-
-      // Only attempt to process if the popup contains identifiable CDP options
       nativePopups.forEach(popup => {
-          const style = popup.getAttribute('style') || '';
-          if (style.includes('display: none') || style.includes('visibility: hidden')) return;
-
-          const clickableItems = Array.from(popup.querySelectorAll('[data-cdp-click]'));
-          if (clickableItems.length > 0) {
-              // Valid popup! Extract it so morphdom doesn't render the raw messy version in Shadow DOM
-              extractedPopup = popup.cloneNode(true);
-              popup.innerHTML = ''; // Wipe original to avoid rendering
-              popup.style.display = 'none'; // Ensure it's hidden
-          }
+          popup.innerHTML = '';
+          popup.style.display = 'none';
       });
 
       morphdom(viewport, temp, {
         onBeforeElUpdated: (fromEl, toEl) => {
           if (fromEl.isEqualNode(toEl)) return false;
-          // Sync textareas so local state isn't wrongly preserved when IDE state resets
           if (fromEl.tagName === 'TEXTAREA' || fromEl.tagName === 'INPUT') {
             if (fromEl.value !== toEl.value) {
               fromEl.value = toEl.value;
@@ -396,17 +389,6 @@ export async function updateContent(id) {
           return true;
         }
       });
-
-      // Post-morphdom: If we extracted a valid popup, render it natively as a bubble
-      if (extractedPopup) {
-          renderPopupBubble(extractedPopup);
-      } else {
-          // No popup in new DOM = close any existing Bubbles (but respect dismiss debounce)
-          const existingBubble = document.getElementById('mobile-popup-overlay');
-          if (existingBubble && (Date.now() - lastDismissTime > 500)) {
-              existingBubble.remove();
-          }
-      }
 
     } else {
       viewport.innerHTML = data.html;
@@ -704,6 +686,37 @@ async function handleCDPClick(e) {
           renderCustomNativeDropdown(clickable, idx, options);
       } else {
           fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'empty_dropdown_intercepted'})}).catch(()=>{});
+      }
+      return;
+  }
+
+  // ===== POPUP TRIGGER PATH =====
+  // If the element looks like a popup trigger (dropdown, model selector, mode button),
+  // use the dedicated /popup API instead of morphdom-based extraction
+  if (isPopupTrigger(clickable)) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const clickX = lastClickEvent ? lastClickEvent.clientX : window.innerWidth / 2;
+      const clickY = lastClickEvent ? lastClickEvent.clientY : window.innerHeight / 2;
+      
+      // Prepare invisible overlay (no loading state shown)
+      const overlay = preparePopupOverlay();
+      overlay.dataset.triggerIndex = idx;
+      overlay.dataset.clickX = clickX;
+      overlay.dataset.clickY = clickY;
+      
+      // Request popup content and show directly when ready
+      try {
+          const res = await fetch(`/popup/${currentId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ index: parseInt(idx) })
+          });
+          const data = await res.json();
+          showPopupBubble(data.items, clickX, clickY);
+      } catch (err) {
+          dismissPopupBubble();
       }
       return;
   }

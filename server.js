@@ -1533,7 +1533,7 @@ async function main() {
         else res.status(500).json(result);
     });
 
-    // Click passthrough: forward a click to the IDE via CDP
+    // Click passthrough: forward a click to the IDE via CDP (pure click, no snapshot)
     app.post('/click/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
@@ -1543,26 +1543,14 @@ async function main() {
         if (!selector) return res.status(400).json({ error: 'Invalid click index' });
 
         try {
-            // Enhanced: also try to extract the file path from the element context
-            const result = await c.cdp.call('Runtime.evaluate', {
+            // Step 1: Scroll element into view
+            const scrollResult = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
                   try {
                     const el = document.querySelector(${JSON.stringify(selector)});
                     if (!el) return { ok: false, reason: 'element not found: ' + ${JSON.stringify(selector)} };
-                    el.click();
-                    const text = (el.textContent || '').substring(0, 200).trim();
-                    // Try to detect file path from nearby context
-                    let filePath = null;
-                    const href = el.getAttribute('href') || '';
-                    if (href.startsWith('file://')) {
-                        filePath = decodeURIComponent(href.replace('file://', ''));
-                    }
-                    // For VS Code link widgets, check data attributes
-                    const dataUri = el.getAttribute('data-href') || el.closest('[data-href]')?.getAttribute('data-href') || '';
-                    if (!filePath && dataUri.startsWith('file://')) {
-                        filePath = decodeURIComponent(dataUri.replace('file://', ''));
-                    }
-                    return { ok: true, text, filePath };
+                    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                    return { ok: true };
                   } catch (e) {
                     return { ok: false, reason: 'JS Eval Exception: ' + e.message };
                   }
@@ -1570,74 +1558,405 @@ async function main() {
                 returnByValue: true,
                 contextId: c.cdp.rootContextId
             });
-            const val = result.result?.value;
-            if (val?.ok) {
-                console.log(`🖱️ Click forwarded: "${val.text}"${val.filePath ? ` (file: ${val.filePath})` : ''}`);
-                res.json({ success: true, text: val.text, filePath: val.filePath });
-
-                // Trigger a delayed snapshot to capture IDE state *after* click is processed
-                setTimeout(async () => {
-                    if (cascades.has(req.params.id)) {
-                        try {
-                            const newHtml = await captureHTML(c.cdp);
-                            if (newHtml) {
-                                // Update cached snapshot
-                                const snap = c.snapshot || { html: '', clickMap: {} };
-                                snap.html = newHtml;
-                                c.snapshot = snap;
-                                // Broadcast update to clients
-                                wss.clients.forEach(client => {
-                                    if (client.readyState === 1) { /* WebSocket.OPEN */
-                                        client.send(JSON.stringify({ type: 'update' }));
-                                    }
-                                });
-                            }
-                        } catch (err) {
-                            console.error('Delayed capture failed after click:', err);
-                        }
-                    }
-                }, 300);
-
-            } else {
-                res.status(500).json({ error: val?.reason || 'click failed' });
+            if (!scrollResult.result?.value?.ok) {
+                return res.status(500).json({ error: scrollResult.result?.value?.reason || 'scroll failed' });
             }
+
+            // Step 2: Wait for scroll to settle
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            // Step 3: Re-read coordinates after scroll
+            const locateResult = await c.cdp.call('Runtime.evaluate', {
+                expression: `(() => {
+                  try {
+                    const el = document.querySelector(${JSON.stringify(selector)});
+                    if (!el) return { ok: false, reason: 'element not found after scroll' };
+                    const rect = el.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
+                    const text = (el.textContent || '').substring(0, 200).trim();
+                    let filePath = null;
+                    const href = el.getAttribute('href') || '';
+                    if (href.startsWith('file://')) {
+                        filePath = decodeURIComponent(href.replace('file://', ''));
+                    }
+                    const dataUri = el.getAttribute('data-href') || el.closest('[data-href]')?.getAttribute('data-href') || '';
+                    if (!filePath && dataUri.startsWith('file://')) {
+                        filePath = decodeURIComponent(dataUri.replace('file://', ''));
+                    }
+                    return { ok: true, text, filePath, cx, cy };
+                  } catch (e) {
+                    return { ok: false, reason: 'JS Eval Exception: ' + e.message };
+                  }
+                })()`,
+                returnByValue: true,
+                contextId: c.cdp.rootContextId
+            });
+            const val = locateResult.result?.value;
+            if (!val?.ok) {
+                return res.status(500).json({ error: val?.reason || 'locate failed' });
+            }
+
+            // Step 4: Use CDP Input.dispatchMouseEvent for real browser-level click
+            const { cx, cy } = val;
+            await c.cdp.call('Input.dispatchMouseEvent', {
+                type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1
+            });
+            await c.cdp.call('Input.dispatchMouseEvent', {
+                type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1
+            });
+
+            console.log(`🖱️ Click forwarded: "${val.text}"${val.filePath ? ` (file: ${val.filePath})` : ''}`);
+            res.json({ success: true, text: val.text, filePath: val.filePath });
         } catch (e) {
             res.status(500).json({ error: e.message });
         }
     });
 
-    // Dismiss passthrough: forward an Escape keypress to dismiss IDE popups
+    // Popup extraction: click button → wait for popup → extract items → Escape close → return JSON
+    app.post('/popup/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        const idx = req.body.index;
+        const selector = c.snapshot?.clickMap?.[idx];
+        if (!selector) return res.status(400).json({ error: 'Invalid click index' });
+
+        try {
+            // Helper: snapshot signatures of currently visible dialogs and listboxes
+            const snapshotVisibleDialogs = async () => {
+                const r = await c.cdp.call('Runtime.evaluate', {
+                    expression: `(() => {
+                      const sigs = [];
+                      document.querySelectorAll('[role="dialog"], [role="listbox"]').forEach(el => {
+                        const style = window.getComputedStyle(el);
+                        if (style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0') {
+                          sigs.push((el.textContent || '').substring(0, 80).trim());
+                        }
+                      });
+                      return sigs;
+                    })()`,
+                    returnByValue: true,
+                    contextId: c.cdp.rootContextId
+                });
+                return r.result?.value || [];
+            };
+
+            // Helper: scroll element into view and get coordinates for CDP click
+            const clickTrigger = async () => {
+                // First: scroll into view and get coordinates
+                const locateResult = await c.cdp.call('Runtime.evaluate', {
+                    expression: `(() => {
+                      const el = document.querySelector(${JSON.stringify(selector)});
+                      if (!el) return { ok: false };
+                      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                      const rect = el.getBoundingClientRect();
+                      return { ok: true, text: (el.textContent || '').substring(0, 100).trim(), cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                    })()`,
+                    returnByValue: true,
+                    contextId: c.cdp.rootContextId
+                });
+                const val = locateResult.result?.value;
+                if (!val?.ok) return locateResult;
+                
+                // Small delay for scroll to settle
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                // Re-read position after scroll  
+                const posResult = await c.cdp.call('Runtime.evaluate', {
+                    expression: `(() => {
+                      const el = document.querySelector(${JSON.stringify(selector)});
+                      if (!el) return { ok: false };
+                      const rect = el.getBoundingClientRect();
+                      return { ok: true, text: (el.textContent || '').substring(0, 100).trim(), cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                    })()`,
+                    returnByValue: true,
+                    contextId: c.cdp.rootContextId
+                });
+                const pos = posResult.result?.value;
+                if (!pos?.ok) return posResult;
+                
+                // CDP native mouse click
+                await c.cdp.call('Input.dispatchMouseEvent', {
+                    type: 'mousePressed', x: pos.cx, y: pos.cy, button: 'left', clickCount: 1
+                });
+                await c.cdp.call('Input.dispatchMouseEvent', {
+                    type: 'mouseReleased', x: pos.cx, y: pos.cy, button: 'left', clickCount: 1
+                });
+                
+                return { result: { value: pos } };
+            };
+
+            // Helper: send Escape to close IDE popup (prevents snapshot corruption)
+            const sendEscape = async () => {
+                try {
+                    await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                    await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                } catch (_) {}
+            };
+
+            const doExtract = async (beforeSigs) => {
+                return c.cdp.call('Runtime.evaluate', {
+                    expression: `((beforeSigs) => {
+                      let items = [];
+                      
+                      // Search both dialog and listbox containers
+                      const containers = document.querySelectorAll('[role="dialog"], [role="listbox"]');
+                      let targetDialog = null;
+                      let isListbox = false;
+                      
+                      for (const dialog of containers) {
+                        const style = window.getComputedStyle(dialog);
+                        if (style.visibility === 'hidden') continue;
+                        if (style.display === 'none') continue;
+                        if (style.pointerEvents === 'none') continue;
+                        
+                        const sig = (dialog.textContent || '').substring(0, 80).trim();
+                        if (beforeSigs.some(bs => bs === sig)) continue;
+                        
+                        const role = dialog.getAttribute('role');
+                        if (role === 'listbox') {
+                          // HeadlessUI listbox — always has [role=option] children
+                          if (dialog.querySelector('[role="option"]')) {
+                            targetDialog = dialog;
+                            isListbox = true;
+                            break;
+                          }
+                        } else {
+                          // Dialog — check for interactive children
+                          const hasInteractive = dialog.querySelector(
+                            'div[class*="cursor-pointer"], div[class*="hover:"], [role="option"], [role="menuitem"]'
+                          );
+                          if (!hasInteractive) continue;
+                          targetDialog = dialog;
+                          break;
+                        }
+                      }
+                      
+                      if (!targetDialog) return { items: [], found: false };
+                      
+                      // Shared helper: build a CSS selector path from a DOM node
+                      const buildPath = (node) => {
+                        const parts = [];
+                        while (node && node !== document.body) {
+                          const parent = node.parentElement;
+                          if (!parent) break;
+                          const siblings = Array.from(parent.children);
+                          const index = siblings.indexOf(node) + 1;
+                          const tag = node.tagName.toLowerCase();
+                          parts.unshift(tag + ':nth-child(' + index + ')');
+                          node = parent;
+                        }
+                        return 'body > ' + parts.join(' > ');
+                      };
+                      
+                      // Fast path for HeadlessUI Listbox containers
+                      if (isListbox) {
+                        const options = targetDialog.querySelectorAll('[role="option"]');
+                        for (const opt of options) {
+                          const text = (opt.textContent || '').trim();
+                          if (!text || text.length > 100) continue;
+                          const isSelected = opt.getAttribute('aria-selected') === 'true' ||
+                                             opt.getAttribute('data-headlessui-state')?.includes('selected');
+                          items.push({
+                            title: text,
+                            description: '',
+                            badges: [],
+                            header: '',
+                            selector: opt.id ? '#' + opt.id : buildPath(opt),
+                            checked: isSelected
+                          });
+                        }
+                        return { items, found: true };
+                      }
+                      
+                      let header = '';
+                      const headerEl = targetDialog.querySelector('.text-xs.opacity-80, .text-xs.pb-1');
+                      if (headerEl) header = (headerEl.textContent || '').trim();
+                      
+                      const candidates = targetDialog.querySelectorAll(
+                        'div[class*="cursor-pointer"], div[class*="hover:"], button, ' +
+                        '[role="option"], [role="menuitem"], li'
+                      );
+                      
+                      const allTexts = new Set();
+                      
+                      for (const el of candidates) {
+                        const fullText = (el.textContent || '').trim();
+                        if (!fullText || fullText.length > 200 || allTexts.has(fullText)) continue;
+                        
+                        const childCandidates = el.querySelectorAll(
+                          'div[class*="cursor-pointer"], div[class*="hover:"], button'
+                        );
+                        if (childCandidates.length > 0) continue;
+                        
+                        allTexts.add(fullText);
+                        
+                        let title = '';
+                        let description = '';
+                        const badges = [];
+                        
+                        const titleEl = el.querySelector('.font-medium, .font-semibold, .font-bold');
+                        const descEl = el.querySelector('.opacity-50, .opacity-60, .text-muted');
+                        
+                        if (titleEl) {
+                          title = (titleEl.textContent || '').trim();
+                          if (descEl) description = (descEl.textContent || '').trim();
+                        } else {
+                          title = fullText;
+                        }
+                        
+                        if (!title) continue;
+                        
+                        el.querySelectorAll('.text-xs').forEach(badge => {
+                          const bt = (badge.textContent || '').trim();
+                          if (bt.toLowerCase() === 'new') badges.push(bt);
+                        });
+                        
+                        const itemSelector = el.id ? '#' + el.id : buildPath(el);
+                        
+                        items.push({
+                          title, description, badges, header: header || '',
+                          selector: itemSelector,
+                          checked: el.getAttribute('aria-checked') === 'true' || 
+                                   el.classList.contains('checked') ||
+                                   el.classList.contains('selected')
+                        });
+                      }
+                      
+                      return { items, found: true };
+                    })(${JSON.stringify(beforeSigs)})`,
+                    returnByValue: true,
+                    contextId: c.cdp.rootContextId
+                });
+            };
+
+            // Step 1: Snapshot visible dialogs BEFORE click
+            const beforeSigs = await snapshotVisibleDialogs();
+
+            // Step 2: Click trigger to toggle the popup
+            const clickResult = await clickTrigger();
+            if (!clickResult.result?.value?.ok) {
+                return res.status(500).json({ error: 'Failed to click trigger element' });
+            }
+            console.log(`🎯 Popup trigger clicked: "${clickResult.result.value.text}"`);
+
+            // Step 3: Wait for popup to render
+            await new Promise(resolve => setTimeout(resolve, 350));
+
+            // Step 4: Extract items from NEWLY visible dialog
+            let extractResult = await doExtract(beforeSigs);
+            let popupData = extractResult.result?.value || { items: [] };
+
+            // Step 5: If 0 items, click likely CLOSED the popup (toggle off)
+            // Take fresh snapshot → click again to reopen → extract
+            if (popupData.items.length === 0) {
+                console.log(`🔄 Popup toggle retry (0 items, clicking again to reopen)`);
+                const freshSigs = await snapshotVisibleDialogs();
+                await clickTrigger();
+                await new Promise(resolve => setTimeout(resolve, 350));
+                extractResult = await doExtract(freshSigs);
+                popupData = extractResult.result?.value || { items: [] };
+            }
+
+            // Step 6: Leave the popup OPEN (popup-click will click the option directly)
+            // The Escape will be sent by popup-click after selection, or by dismiss route
+
+            console.log(`📋 Popup extracted: ${popupData.items.length} items`);
+            res.json(popupData);
+
+        } catch (e) {
+            // Close popup on extraction error
+            try {
+                await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+            } catch (_) {}
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Popup item click: directly click a visible option in the already-open popup
+    app.post('/popup-click/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        const { title } = req.body;
+        if (!title) return res.status(400).json({ error: 'No title provided' });
+
+        try {
+            // Find the visible option by text and click it
+            const locateResult = await c.cdp.call('Runtime.evaluate', {
+                expression: `(() => {
+                  const targetText = ${JSON.stringify(title)};
+                  // Search [role=option] (HeadlessUI listbox) — popup should still be open
+                  const options = document.querySelectorAll('[role="option"]');
+                  for (const opt of options) {
+                    const t = (opt.textContent || '').trim();
+                    if (t === targetText) {
+                      const rect = opt.getBoundingClientRect();
+                      if (rect.height > 0 && rect.top >= 0 && rect.top < window.innerHeight) {
+                        return { ok: true, text: t, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                      }
+                    }
+                  }
+                  // Also search dialog items (non-listbox popups)
+                  const items = document.querySelectorAll('[role="menuitem"], [role="dialog"] li[class*="cursor-pointer"], [role="dialog"] div[class*="cursor-pointer"]');
+                  for (const item of items) {
+                    const t = (item.textContent || '').trim();
+                    if (t === targetText) {
+                      const rect = item.getBoundingClientRect();
+                      if (rect.height > 0) {
+                        return { ok: true, text: t, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+                      }
+                    }
+                  }
+                  return { ok: false, optCount: options.length, optTexts: Array.from(options).slice(0, 5).map(o => (o.textContent||'').trim().substring(0,30)) };
+                })()`,
+                returnByValue: true,
+                contextId: c.cdp.rootContextId
+            });
+            const val = locateResult.result?.value;
+            
+            if (!val?.ok) {
+                console.log(`❌ Popup option not found: "${title}" (${val?.optCount || 0} options: ${JSON.stringify(val?.optTexts || [])})`);
+                // Send Escape to close the dangling popup
+                try {
+                    await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                    await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                } catch (_) {}
+                return res.status(500).json({ error: 'option not found', debug: val });
+            }
+
+            // CDP native mouse click on the option
+            const { cx, cy } = val;
+            await c.cdp.call('Input.dispatchMouseEvent', {
+                type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1
+            });
+            await c.cdp.call('Input.dispatchMouseEvent', {
+                type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1
+            });
+
+            console.log(`✅ Popup item clicked: "${val.text}"`);
+            res.json({ success: true, text: val.text });
+        } catch (e) {
+            // Clean up on error
+            try {
+                await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+                await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+            } catch (_) {}
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Dismiss passthrough: forward an Escape keypress to dismiss IDE popups (no snapshot)
     app.post('/dismiss/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
 
         try {
-            await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape',  windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+            await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
             await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
-            
             res.json({ success: true });
-
-            // Trigger a delayed snapshot to capture IDE state after dismiss
-            setTimeout(async () => {
-                if (cascades.has(req.params.id)) {
-                    try {
-                        const newHtml = await captureHTML(c.cdp);
-                        if (newHtml) {
-                            const snap = c.snapshot || { html: '', clickMap: {} };
-                            snap.html = newHtml;
-                            c.snapshot = snap;
-                            wss.clients.forEach(client => {
-                                if (client.readyState === 1) {
-                                    client.send(JSON.stringify({ type: 'update' }));
-                                }
-                            });
-                        }
-                    } catch (err) {
-                        console.error('Delayed capture failed after dismiss:', err);
-                    }
-                }
-            }, 150);
-
         } catch (e) {
             res.status(500).json({ error: e.message });
         }

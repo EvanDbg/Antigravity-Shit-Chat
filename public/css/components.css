@@ -556,6 +556,13 @@
   }
 }
 
+.mobile-popup-header {
+  font-size: 11px;
+  opacity: 0.55;
+  padding: 8px 14px 4px;
+  line-height: 1.2;
+}
+
 .mobile-popup-item {
   padding: 10px 14px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.1);
@@ -563,6 +570,11 @@
 }
 .mobile-popup-item:last-child {
   border-bottom: none;
+}
+.mobile-popup-item-checked {
+  border-left: 3px solid var(--accent);
+  padding-left: 11px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .mobile-popup-item:active {
   background: rgba(128, 128, 128, 0.2);
