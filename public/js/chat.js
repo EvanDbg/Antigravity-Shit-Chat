@@ -6,6 +6,13 @@ import { escapeHtml } from './utils.js';
 let shadowRoot = null;
 let currentId = null;
 let scrollSyncLock = false;
+
+// Global click interceptor to track interaction coordinates for popup positioning
+let lastClickEvent = null;
+window.addEventListener('click', (e) => {
+    lastClickEvent = e;
+}, true);
+
 let scrollTimer = null;
 let pendingScrollTop = null;
 
@@ -223,7 +230,140 @@ export async function updateContent(id) {
       }
     }
 
+    // =========================================================================
+    // Core Logic: Bubble Popup Renderer (Outside Shadow DOM)
+    // =========================================================================
+    function renderPopupBubble(nativePopup) {
+        let overlay = document.getElementById('mobile-popup-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'mobile-popup-overlay';
+            overlay.className = 'mobile-popup-backdrop';
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.dataset.autoClose = 'false'; // prevent aggressive re-closing by immediate snapshot
+                    overlay.remove();
+                    // trigger dismiss
+                    fetch(`/dismiss/${currentId}`, { method: 'POST' }).catch(()=>{});
+                }
+            });
+            document.body.appendChild(overlay);
+        }
+        
+        overlay.innerHTML = '';
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'mobile-popup-bubble';
+        
+        // --- Smart Content Extraction ---
+        const options = Array.from(nativePopup.querySelectorAll('[data-cdp-click]'));
+        options.forEach((opt, index) => {
+            const rawTextLines = (opt.textContent || '').trim().split('\n').map(l => l.trim()).filter(Boolean);
+            if(rawTextLines.length === 0) return;
+            
+            // Try to separate title / new badge / description
+            let title = rawTextLines[0];
+            let description = '';
+            let badges = [];
+            
+            rawTextLines.slice(1).forEach(line => {
+                if(line.toLowerCase() === 'new') badges.push(line);
+                else description += line + ' ';
+            });
+
+            // Reconstruct clean HTML
+            const itemEl = document.createElement('div');
+            itemEl.className = 'mobile-popup-item';
+            
+            let html = `<div class="mobile-popup-title"><span>${escapeHtml(title)}</span>`;
+            if (badges.length > 0) {
+                html += `<span class="mobile-popup-badge">${escapeHtml(badges.join(' '))}</span>`;
+            }
+            html += `</div>`;
+            
+            if (description) {
+                html += `<div class="mobile-popup-desc">${escapeHtml(description.trim())}</div>`;
+            }
+            
+            itemEl.innerHTML = html;
+            
+            // Bind click to the native CDP element's ID
+            itemEl.addEventListener('click', () => {
+                const cdpId = opt.getAttribute('data-cdp-click');
+                overlay.remove(); // immediate visual feedback
+                fetch(`/click/${currentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ index: parseInt(cdpId) })
+                }).catch(()=>{});
+            });
+            
+            bubble.appendChild(itemEl);
+        });
+
+        overlay.appendChild(bubble);
+
+        // --- Smart Positioning (Coordinate Hijacking) ---
+        // Find click coordinates, fallback to center
+        let clickX = window.innerWidth / 2;
+        let clickY = window.innerHeight / 2;
+        let fromClick = false;
+
+        if (lastClickEvent && (Date.now() - lastClickEvent.timeStamp < 2000)) {
+            // Only use click event if it's very recent (less than 2s ago)
+            clickX = lastClickEvent.clientX;
+            clickY = lastClickEvent.clientY;
+            fromClick = true;
+        }
+
+        // Delay positioning slightly to let DOM calculate bubble height
+        requestAnimationFrame(() => {
+            if (!fromClick) {
+                bubble.style.top = '50%';
+                bubble.style.left = '50%';
+                bubble.style.transform = 'translate(-50%, -50%)';
+                return;
+            }
+
+            const bRect = bubble.getBoundingClientRect();
+            // Position horizontally (bounded by screen width)
+            let left = clickX - (bRect.width / 2);
+            left = Math.max(16, Math.min(window.innerWidth - bRect.width - 16, left));
+            
+            bubble.style.left = left + 'px';
+
+            // Position vertically - check if it fits below
+            const spaceBelow = window.innerHeight - clickY;
+            if (spaceBelow >= (bRect.height + 20)) {
+                // Drop down
+                bubble.style.top = (clickY + 12) + 'px';
+                bubble.classList.add('arrow-up');
+            } else {
+                // Pop up
+                bubble.style.top = (clickY - bRect.height - 12) + 'px';
+                bubble.classList.add('arrow-down');
+            }
+        });
+    }
+
     if (morphdom) {
+      // ===== DOM EXTRACTION & NOISE REDUCTION =====
+      // Intercept specific popup containers before morphdom merges them.
+      // E.g. VSCode renders dropdowns at root level with specific classes/roles.
+      const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], .monaco-menu-container, [role="menu"][style*="fixed"]'));
+      let extractedPopup = null;
+
+      // Only attempt to process if the popup contains identifiable CDP options
+      nativePopups.forEach(popup => {
+          const clickableItems = Array.from(popup.querySelectorAll('[data-cdp-click]'));
+          if (clickableItems.length > 0) {
+              // Valid popup! Extract it so morphdom doesn't render the raw messy version in Shadow DOM
+              extractedPopup = popup.cloneNode(true);
+              popup.innerHTML = ''; // Wipe original to avoid rendering
+              popup.style.display = 'none'; // Ensure it's hidden
+          }
+      });
+
       morphdom(viewport, temp, {
         onBeforeElUpdated: (fromEl, toEl) => {
           if (fromEl.isEqualNode(toEl)) return false;
@@ -236,71 +376,20 @@ export async function updateContent(id) {
           return true;
         }
       });
+
+      // Post-morphdom: If we extracted a valid popup, render it natively as a bubble
+      if (extractedPopup) {
+          renderPopupBubble(extractedPopup);
+      } else {
+          // No popup in new DOM = close any existing Bubbles
+          const existingBubble = document.getElementById('mobile-popup-overlay');
+          if (existingBubble && existingBubble.dataset.autoClose !== 'false') {
+              existingBubble.remove();
+          }
+      }
+
     } else {
       viewport.innerHTML = data.html;
-    }
-
-    // ============================================================
-    // Dynamic Popup Positioning (Anchor to Trigger Element)
-    // Re-calculate any dynamically spawned menus so they anchor properly
-    const popups = Array.from(viewport.querySelectorAll('[data-portal-popup="true"]'));
-    if (popups.length > 0 && lastClickedCdpIndex) {
-        lastPopupIndex++;
-        
-        popups.forEach((p, idx) => {
-            // Enforce singleton visibility - only keep the last (most recent) popup visible
-            if (idx !== popups.length - 1) {
-                p.style.setProperty('display', 'none', 'important');
-                p.style.setProperty('opacity', '0', 'important');
-                p.style.setProperty('pointer-events', 'none', 'important');
-            } else {
-                p.style.setProperty('display', 'block', 'important');
-                p.style.setProperty('opacity', '1', 'important');
-                p.style.setProperty('pointer-events', 'auto', 'important');
-                p.style.setProperty('position', 'fixed', 'important');
-                
-                // Clear any leftover inline/CSS overrides
-                p.style.top = 'auto';
-                p.style.bottom = 'auto';
-                p.style.left = 'auto';
-                p.style.right = 'auto';
-                p.style.transform = 'none';
-                p.style.margin = '0';
-                
-                // Calculate width/position safely after a brief layout yield
-                setTimeout(() => {
-                    const anchorNode = viewport.querySelector(`[data-cdp-click="${lastClickedCdpIndex}"]`);
-                    if (anchorNode) {
-                        const anchorRect = anchorNode.getBoundingClientRect();
-                        const vh = window.innerHeight;
-                        const vw = window.innerWidth;
-                        const topSpace = anchorRect.top;
-                        const bottomSpace = vh - anchorRect.bottom;
-                        
-                        const pWidth = p.offsetWidth || 300;
-                        const pHeight = p.offsetHeight || 200;
-                        
-                        let leftPos = anchorRect.left + (anchorRect.width / 2) - (pWidth / 2);
-                        leftPos = Math.max(10, Math.min(leftPos, vw - pWidth - 10)); // bounds check
-                        p.style.left = leftPos + 'px';
-                        
-                        // Adaptive Positioning Algorithm
-                        if (topSpace > bottomSpace && topSpace > (pHeight + 20)) {
-                            // Upwards
-                            p.style.top = Math.max(10, anchorRect.top - pHeight - 8) + 'px';
-                        } else {
-                            // Downwards
-                            p.style.top = Math.max(10, anchorRect.bottom + 8) + 'px';
-                        }
-                    } else {
-                        // Safe fallback to center screen if anchor vanished
-                        p.style.top = '50%';
-                        p.style.left = '50%';
-                        p.style.transform = 'translate(-50%, -50%)';
-                    }
-                }, 10);
-            }
-        });
     }
 
     // Post-process: detect file names

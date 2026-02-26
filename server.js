@@ -1574,9 +1574,70 @@ async function main() {
             if (val?.ok) {
                 console.log(`🖱️ Click forwarded: "${val.text}"${val.filePath ? ` (file: ${val.filePath})` : ''}`);
                 res.json({ success: true, text: val.text, filePath: val.filePath });
+
+                // Trigger a delayed snapshot to capture IDE state *after* click is processed
+                setTimeout(async () => {
+                    if (cascades.has(req.params.id)) {
+                        try {
+                            const newHtml = await captureHTML(c.cdp);
+                            if (newHtml) {
+                                // Update cached snapshot
+                                const snap = c.snapshot || { html: '', clickMap: {} };
+                                snap.html = newHtml;
+                                c.snapshot = snap;
+                                // Broadcast update to clients
+                                wss.clients.forEach(client => {
+                                    if (client.readyState === 1) { /* WebSocket.OPEN */
+                                        client.send(JSON.stringify({ type: 'update' }));
+                                    }
+                                });
+                            }
+                        } catch (err) {
+                            console.error('Delayed capture failed after click:', err);
+                        }
+                    }
+                }, 150);
+
             } else {
                 res.status(500).json({ error: val?.reason || 'click failed' });
             }
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Dismiss passthrough: forward an Escape keypress to dismiss IDE popups
+    app.post('/dismiss/:id', async (req, res) => {
+        const c = cascades.get(req.params.id);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        try {
+            await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape',  windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+            await c.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+            
+            res.json({ success: true });
+
+            // Trigger a delayed snapshot to capture IDE state after dismiss
+            setTimeout(async () => {
+                if (cascades.has(req.params.id)) {
+                    try {
+                        const newHtml = await captureHTML(c.cdp);
+                        if (newHtml) {
+                            const snap = c.snapshot || { html: '', clickMap: {} };
+                            snap.html = newHtml;
+                            c.snapshot = snap;
+                            wss.clients.forEach(client => {
+                                if (client.readyState === 1) {
+                                    client.send(JSON.stringify({ type: 'update' }));
+                                }
+                            });
+                        }
+                    } catch (err) {
+                        console.error('Delayed capture failed after dismiss:', err);
+                    }
+                }
+            }, 150);
+
         } catch (e) {
             res.status(500).json({ error: e.message });
         }
