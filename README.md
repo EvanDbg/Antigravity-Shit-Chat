@@ -105,3 +105,5 @@ Problems setting up? Can't find an explanation? **Open the Remote Dev folder in 
 This is over local network, so it will not work if you are on a different network, unless you use a VPN or Tailscale or something.
 
 ### Thanks to https://github.com/lukasz-wronski for finding bugs and https://github.com/Mario4272 for the original idea.
+
+### https://github.com/EvanDbg
