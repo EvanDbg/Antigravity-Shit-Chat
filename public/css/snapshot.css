@@ -105,3 +105,22 @@ button[aria-label*="copy"]:active,
   opacity: 1;
 }
 
+/* ============================================
+   Dialog Backdrop Enhancement
+   IDE modal dialogs (e.g. Confirm Undo) use a
+   semi-transparent backdrop (bg-black/40 = 40% opacity)
+   which lets chat text bleed through. We fix this by:
+   1. Making the backdrop nearly opaque
+   2. Forcing z-index above all chat content
+   3. Ensuring the inner card has solid background
+   ============================================ */
+.fixed.inset-0[class*="bg-black"] {
+  background-color: rgba(0, 0, 0, 0.92) !important;
+  z-index: 9999 !important;
+  isolation: isolate;
+}
+/* Dialog inner card: ensure solid background so text doesn't bleed through */
+.fixed.inset-0[class*="bg-black"] > div {
+  z-index: 10000 !important;
+  position: relative;
+}

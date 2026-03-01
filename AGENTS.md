@@ -270,7 +270,7 @@ PWA 清单：standalone 模式、竖屏方向、深色主题。
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **antigravity-remote-dev** (187 symbols, 366 relationships, 14 execution flows).
+This project is indexed by GitNexus as **antigravity-remote-dev** (214 symbols, 439 relationships, 20 execution flows).
 
 GitNexus provides a knowledge graph over this codebase — call chains, blast radius, execution flows, and semantic search.
 

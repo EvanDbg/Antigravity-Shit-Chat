@@ -68,7 +68,7 @@ export function initChatView() {
 // ------------------------------------------------------------------
 async function loadSnapshotCSS() {
   try {
-    const res = await fetch('css/snapshot.css');
+    const res = await fetch('css/snapshot.css?v=2.5.3');
     if (res.ok) {
       const css = await res.text();
       const style = shadowRoot.getElementById('snapshot-adapt');
@@ -327,13 +327,18 @@ function isPopupTrigger(el) {
     if (/combobox|listbox/.test(role)) return true;
 
     // Class-based detection
-    if (/dropdown|select|picker|combobox|trigger/i.test(cls)) return true;
-
-    // IDE bottom-bar: buttons with `select-none` class are typically model/mode selectors
-    if (/select-none/i.test(cls) && text.length < 50) return true;
+    if (/dropdown|picker|combobox|trigger/i.test(cls) ||
+        (/\bselect\b/i.test(cls) && !/select-none|select-text|select-all|select-auto/i.test(cls))) return true;
 
     // Known model/mode text patterns (short text that matches known items)
     const knownTriggerTexts = /^(planning|fast|normal|gemini|claude|gpt|o1|o3|o4|always run|ask first|never)/i;
+
+    // IDE bottom-bar: buttons with `select-none` class are typically model/mode selectors
+    // BUT only when combined with stronger popup signals (aria-haspopup, known trigger text),
+    // since many non-popup UI buttons also use `select-none` (e.g. "Expand all", "Collapse all")
+    if (/select-none/i.test(cls) && text.length < 50 &&
+        (el.getAttribute('aria-haspopup') || knownTriggerTexts.test(text))) return true;
+
     if (text.length < 40 && knownTriggerTexts.test(text)) return true;
 
     // Check for headlessui listbox buttons or aria-haspopup
@@ -418,6 +423,18 @@ export async function updateContent(id, signal) {
           return true;
         }
       });
+
+      // ===== DIALOG STACKING FIX =====
+      // CSS in snapshot.css handles the stacking fix. This is defense-in-depth:
+      // ensure z-index is applied even if CSS fails to load.
+      // NOTE: Do NOT move the dialog node (appendChild) — it breaks morphdom's
+      // diff on the next update cycle (server sends dialog at original position).
+      const dialogOverlay = viewport.querySelector('.fixed.inset-0[class*="bg-black"]');
+      if (dialogOverlay) {
+        if (dialogOverlay.style.zIndex !== '9999') {
+          dialogOverlay.style.zIndex = '9999';
+        }
+      }
 
     } else {
       viewport.innerHTML = data.html;

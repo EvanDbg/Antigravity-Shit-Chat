@@ -521,7 +521,17 @@ async function captureHTML(cdp) {
             const editorContainer = editor.closest('div[class*="relative"]') || editor.parentElement;
             if (editorContainer && editorContainer !== clone) editorContainer.remove();
         }
-        
+
+        // Move dialog overlays (e.g. Confirm Undo) to end of DOM tree.
+        // In Shadow DOM, position:fixed z-index is limited by stacking context —
+        // chat elements with transform/position:relative render ABOVE the dialog.
+        // Moving dialog to last-child ensures it paints last (CSS painting order).
+        // This is done in the clone so morphdom always receives consistent structure.
+        const dialogOverlay = clone.querySelector('.fixed.inset-0[class*="bg-black"]');
+        if (dialogOverlay) {
+            clone.appendChild(dialogOverlay);
+        }
+
         const bodyStyles = window.getComputedStyle(document.body);
 
         // Detect AI completion feedback buttons by their unique data-tooltip-id attributes

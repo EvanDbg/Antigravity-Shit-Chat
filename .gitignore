@@ -39,3 +39,8 @@ docs/
 
 # AI agent config
 .claude/
+# Debug/temp snapshot files
+temp_snapshot.html
+editor_snapshot*.html
+test-monaco-dom.js
+*.html.bak
