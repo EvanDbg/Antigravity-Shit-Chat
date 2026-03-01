@@ -1433,8 +1433,54 @@
 
         let cascades = [];
         let currentCascadeId = null;
+        let currentCascadeSelectionEpoch = 0;
+        let lastRenderedCascadeId = null;
         let ws = null;
         let quotaCache = {}; // { cascadeId: quotaData }
+        const snapshotStateByCascade = {}; // { cascadeId: { requestSeq, lastHash, lastHtml } }
+
+        function getSnapshotState(id) {
+            if (!snapshotStateByCascade[id]) {
+                snapshotStateByCascade[id] = {
+                    requestSeq: 0,
+                    lastHash: '',
+                    lastHtml: ''
+                };
+            }
+            return snapshotStateByCascade[id];
+        }
+
+        function isActiveCascadeSelection(id, selectionEpoch) {
+            if (!id || !currentCascadeId) return false;
+            if (id !== currentCascadeId) return false;
+            if (typeof selectionEpoch === 'number') {
+                return selectionEpoch === currentCascadeSelectionEpoch;
+            }
+            return true;
+        }
+
+        function renderSnapshotHtml(html) {
+            if (typeof html !== 'string') return;
+
+            // Preserve Scroll
+            const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 50;
+
+            // Wrap content in a viewport container for CSS scoping
+            chatContent.innerHTML = `<div id="chat-viewport">${html}</div>`;
+
+            // Post-process: detect file names on clickable elements
+            const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
+            chatContent.querySelectorAll('[data-cdp-click]').forEach(el => {
+                if (el.hasAttribute('data-file-name')) return; // already set by server
+                const text = (el.textContent || '').trim();
+                const match = text.match(fileExtPattern);
+                if (match) {
+                    el.setAttribute('data-file-name', match[1]);
+                }
+            });
+
+            if (isAtBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
 
         function getQuotaColor(pct) {
             if (pct === null || pct === undefined) return '#555';
@@ -1611,18 +1657,27 @@
         }
 
         function selectCascade(id) {
+            if (!id) return;
+            currentCascadeSelectionEpoch += 1;
             currentCascadeId = id;
             renderTabs();
-            loadCascade(id);
+            loadCascade(id, currentCascadeSelectionEpoch);
             renderQuotaBar(id);
         }
 
-        async function applyCascadeStyles(id) {
+        async function applyCascadeStyles(id, selectionEpoch = null) {
+            const requestSelectionEpoch = typeof selectionEpoch === 'number'
+                ? selectionEpoch
+                : (id === currentCascadeId ? currentCascadeSelectionEpoch : null);
             try {
                 const styleRes = await fetch(`/styles/${id}`);
                 if (styleRes.ok) {
                     const styleData = await styleRes.json();
                     const vars = styleData.computedVars || {};
+
+                    if (!isActiveCascadeSelection(id, requestSelectionEpoch)) {
+                        return;
+                    }
 
                     // Build CSS variable declarations from IDE's computed values
                     let varDecls = '';
@@ -1769,44 +1824,68 @@
             } catch (e) { console.error('CSS refresh failed:', e); }
         }
 
-        async function loadCascade(id) {
+        async function loadCascade(id, selectionEpoch = null) {
+            const requestSelectionEpoch = typeof selectionEpoch === 'number'
+                ? selectionEpoch
+                : (id === currentCascadeId ? currentCascadeSelectionEpoch : null);
             try {
                 // 1. Fetch Styles
-                await applyCascadeStyles(id);
+                await applyCascadeStyles(id, requestSelectionEpoch);
 
                 // 2. Fetch Content
-                await updateContentOnly(id);
+                await updateContentOnly(id, { selectionEpoch: requestSelectionEpoch });
             } catch (e) { console.error(e); }
         }
 
-        async function updateContentOnly(id) {
+        async function updateContentOnly(id, options = {}) {
+            const requestSelectionEpoch = typeof options.selectionEpoch === 'number'
+                ? options.selectionEpoch
+                : (id === currentCascadeId ? currentCascadeSelectionEpoch : null);
+            const state = getSnapshotState(id);
+            state.requestSeq += 1;
+            const requestSeq = state.requestSeq;
+
             try {
-                const res = await fetch(`/snapshot/${id}`);
+                const snapshotUrl = state.lastHash
+                    ? `/snapshot/${id}?hash=${encodeURIComponent(state.lastHash)}`
+                    : `/snapshot/${id}`;
+                const res = await fetch(snapshotUrl);
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
 
-                // Preserve Scroll
-                const isAtBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < 50;
+                // latest-wins within same cascade
+                if (requestSeq !== state.requestSeq) return;
+
+                if (typeof data.snapshotHash === 'string' && data.snapshotHash) {
+                    state.lastHash = data.snapshotHash;
+                }
+
+                const unchangedByContract = data.unchanged === true;
+                const unchangedByHashFallback =
+                    !!state.lastHash && typeof data.snapshotHash === 'string' && data.snapshotHash === state.lastHash && typeof data.html !== 'string';
+                if (unchangedByContract || unchangedByHashFallback) {
+                    // Selected tab changed, but server says unchanged for this tab: restore from per-cascade cache
+                    if (isActiveCascadeSelection(id, requestSelectionEpoch) && lastRenderedCascadeId !== id && typeof state.lastHtml === 'string' && state.lastHtml) {
+                        renderSnapshotHtml(state.lastHtml);
+                        lastRenderedCascadeId = id;
+                    }
+                    return;
+                }
+
+                if (typeof data.html !== 'string') return;
+
+                // Re-check right before writes
+                if (requestSeq !== state.requestSeq) return;
+                if (!isActiveCascadeSelection(id, requestSelectionEpoch)) return;
 
                 // Body bg is now primarily set by applyCascadeStyles from CSS vars
                 if (!document.body.style.backgroundColor || document.body.style.backgroundColor === '') {
                     document.body.style.backgroundColor = data.bodyBg || '#1a1a1a';
                 }
-                // Wrap content in a viewport container for CSS scoping
-                chatContent.innerHTML = `<div id="chat-viewport">${data.html}</div>`;
 
-                // Post-process: detect file names on clickable elements
-                const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
-                chatContent.querySelectorAll('[data-cdp-click]').forEach(el => {
-                    if (el.hasAttribute('data-file-name')) return; // already set by server
-                    const text = (el.textContent || '').trim();
-                    const match = text.match(fileExtPattern);
-                    if (match) {
-                        el.setAttribute('data-file-name', match[1]);
-                    }
-                });
-
-                if (isAtBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+                renderSnapshotHtml(data.html);
+                state.lastHtml = data.html;
+                lastRenderedCascadeId = id;
             } catch (e) { }
         }
 
@@ -1814,18 +1893,20 @@
             const input = document.getElementById('messageInput');
             const text = input.value;
             if (!text || !currentCascadeId) return;
+            const targetCascadeId = currentCascadeId;
+            const targetSelectionEpoch = currentCascadeSelectionEpoch;
 
             // Clear immediately to feel responsive
             input.value = '';
             input.style.height = 'auto';
 
             try {
-                await fetch(`/send/${currentCascadeId}`, {
+                await fetch(`/send/${targetCascadeId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: text })
                 });
-                updateContentOnly(currentCascadeId); // Immediate refresh try
+                updateContentOnly(targetCascadeId, { selectionEpoch: targetSelectionEpoch }); // Immediate refresh try
             } catch (e) {
                 console.error("Send failed", e);
                 input.value = text; // Restore on fail
@@ -1856,12 +1937,16 @@
 
             const idx = clickable.getAttribute('data-cdp-click');
             const hasFileName = clickable.hasAttribute('data-file-name');
+            const clickCascadeId = currentCascadeId;
+            const clickSelectionEpoch = currentCascadeSelectionEpoch;
+            const snapshotState = getSnapshotState(clickCascadeId);
+            const snapshotHash = typeof snapshotState?.lastHash === 'string' ? snapshotState.lastHash : '';
             clickable.classList.add('cdp-clicking');
 
             try {
                 // Step 1: 统一关闭当前 Editor 标签（后端判断 tab > 0 才关）
                 try {
-                    const closeRes = await fetch(`/api/close-tab/${currentCascadeId}`, { method: 'POST' });
+                    const closeRes = await fetch(`/api/close-tab/${clickCascadeId}`, { method: 'POST' });
                     const closeData = await closeRes.json();
                     if (closeData.success) {
                         await new Promise(r => setTimeout(r, 300));
@@ -1873,18 +1958,30 @@
                 // Step 1.5: Record current tab (for non-file elements tab-change fallback)
                 let beforeTab = null;
                 if (!hasFileName) {
-                    const beforeRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                    const beforeRes = await fetch(`/api/active-tab-name/${clickCascadeId}`);
                     beforeTab = await beforeRes.json();
                 }
 
                 // Step 2: Execute the click via CDP
-                const res = await fetch(`/click/${currentCascadeId}`, {
+                const res = await fetch(`/click/${clickCascadeId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ index: parseInt(idx) })
+                    body: JSON.stringify({
+                        index: parseInt(idx, 10),
+                        snapshotHash: snapshotHash || undefined
+                    })
                 });
                 const data = await res.json();
-                if (!res.ok) console.warn('Click failed:', data.error);
+                if (!res.ok || data?.success !== true) {
+                    const reason = data?.reason || 'click_failed';
+                    const detail = data?.error || 'Unknown click passthrough error';
+                    console.warn(`Click passthrough failed [${reason}]: ${detail}`);
+                    alert(`Click failed (${reason}): ${detail}`);
+                    if (reason === 'stale_snapshot') {
+                        updateContentOnly(clickCascadeId, { selectionEpoch: clickSelectionEpoch });
+                    }
+                    return;
+                }
 
                 // Step 3: Wait for editor to respond
                 await new Promise(r => setTimeout(r, 500));
@@ -1895,7 +1992,7 @@
                     openFilePreview();
                 } else {
                     // Other elements → use tab-change heuristic as fallback
-                    const afterRes = await fetch(`/api/active-tab-name/${currentCascadeId}`);
+                    const afterRes = await fetch(`/api/active-tab-name/${clickCascadeId}`);
                     const afterTab = await afterRes.json();
                     if (afterTab.name && afterTab.name !== beforeTab?.name) {
                         openFilePreview();
@@ -1913,8 +2010,11 @@
         let scrollSyncLock = false; // prevent feedback loop from snapshot update
         chatContainer.addEventListener('scroll', () => {
             if (!currentCascadeId || scrollSyncLock) return;
+            const cascadeId = currentCascadeId;
+            const selectionEpoch = currentCascadeSelectionEpoch;
             if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
             scrollDebounceTimer = setTimeout(() => {
+                if (!isActiveCascadeSelection(cascadeId, selectionEpoch)) return;
                 const maxScroll = chatContainer.scrollHeight - chatContainer.clientHeight;
                 if (maxScroll <= 0) return;
                 const ratio = chatContainer.scrollTop / maxScroll;
@@ -1922,15 +2022,16 @@
                 const indicator = document.getElementById('scrollLoadingIndicator');
                 if (indicator) indicator.classList.add('active');
 
-                fetch(`/scroll/${currentCascadeId}`, {
+                fetch(`/scroll/${cascadeId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ ratio })
                 }).then(r => r.json()).then(data => {
                     // Wait for snapshot refresh after IDE scrolls + lazy loads
                     setTimeout(() => {
+                        if (!isActiveCascadeSelection(cascadeId, selectionEpoch)) return;
                         scrollSyncLock = true;
-                        updateContentOnly(currentCascadeId).finally(() => {
+                        updateContentOnly(cascadeId, { selectionEpoch }).finally(() => {
                             setTimeout(() => { scrollSyncLock = false; }, 200);
                         });
                     }, 400);

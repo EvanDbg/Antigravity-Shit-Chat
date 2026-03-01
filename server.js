@@ -471,12 +471,55 @@ async function captureHTML(cdp) {
             || document.getElementById('chat');
         if (!target) return { error: 'chat container not found' };
         
-        // Annotate clickable elements for click passthrough
-        const clickSelector = 'button, a, [role="button"], [class*="cursor-pointer"]';
-        const liveClickables = Array.from(target.querySelectorAll(clickSelector));
+        // Annotate clickable elements for click passthrough (semantic-first to avoid false positives)
+        const clickSelector = 'button, a, [role], [aria-expanded], [aria-controls], [onclick], [data-tooltip-id], [tabindex], [class*="cursor-pointer"]';
+        const actionableRoles = new Set(['button', 'link', 'menuitem', 'option', 'tab', 'checkbox', 'radio', 'switch']);
+        function isSemanticallyClickable(el) {
+            if (!(el instanceof Element)) return false;
+            const tag = (el.tagName || '').toLowerCase();
+            if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') return false;
+
+            if (tag === 'button') return true;
+            if (tag === 'a') {
+                const href = (el.getAttribute('href') || '').trim().toLowerCase();
+                if (href && href !== '#' && !href.startsWith('javascript:')) return true;
+                if (el.getAttribute('role') === 'button') return true;
+            }
+
+            const role = (el.getAttribute('role') || '').trim().toLowerCase();
+            if (role && actionableRoles.has(role)) return true;
+
+            if (el.hasAttribute('aria-expanded') || el.hasAttribute('aria-controls')) return true;
+            if (el.hasAttribute('onclick')) return true;
+            if (el.hasAttribute('data-tooltip-id') && (role && actionableRoles.has(role) || tag === 'button' || tag === 'a')) return true;
+
+            // Cursor pointer alone is too noisy: require additional action semantics
+            const cls = (el.className && typeof el.className === 'string') ? el.className : '';
+            const hasPointerClass = cls.includes('cursor-pointer');
+            const tabIndex = el.tabIndex;
+            const hasActionHint = !!(role || el.hasAttribute('aria-label') || el.hasAttribute('title') || el.hasAttribute('data-tooltip-id') || el.hasAttribute('onclick'));
+            if (hasPointerClass && tabIndex >= 0 && hasActionHint) return true;
+
+            return false;
+        }
+        const liveEditor = target.querySelector('[contenteditable="true"]');
+        const liveEditorContainer = liveEditor
+            ? (liveEditor.closest('div[class*="relative"]') || liveEditor.parentElement)
+            : null;
+
+        const liveClickables = Array.from(target.querySelectorAll(clickSelector)).filter(el => {
+            if (!isSemanticallyClickable(el)) return false;
+            if (liveEditorContainer && liveEditorContainer.contains(el)) return false;
+            return true;
+        });
+
         const selectorMap = {};
+        const selectorBuckets = {};
         liveClickables.forEach((el, i) => {
-            selectorMap[i] = buildSelector(el);
+            const selector = buildSelector(el);
+            selectorMap[i] = selector;
+            if (!selectorBuckets[selector]) selectorBuckets[selector] = [];
+            selectorBuckets[selector].push(i);
         });
 
         const clone = target.cloneNode(true);
@@ -492,27 +535,41 @@ async function captureHTML(cdp) {
             }
         });
 
-        // Tag clone elements with matching indexes
-        const cloneClickables = Array.from(clone.querySelectorAll(clickSelector));
-        // File extension pattern for detection
-        const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
-        cloneClickables.forEach((el, i) => {
-            if (i < liveClickables.length) el.setAttribute('data-cdp-click', i);
-            // Detect file links by text content matching file patterns
-            const text = (el.textContent || '').trim();
-            const match = text.match(fileExtPattern);
-            if (match) {
-                el.setAttribute('data-file-name', match[1]);
-            }
-        });
-
-        // Remove input box to keep snapshot clean
+        // Remove input box to keep snapshot clean (before clickable tagging for stable alignment)
         const editor = clone.querySelector('[contenteditable="true"]');
         if (editor) {
             const editorContainer = editor.closest('div[class*="relative"]') || editor.parentElement;
             if (editorContainer && editorContainer !== clone) editorContainer.remove();
         }
-        
+
+        // Tag clone elements with selector-aligned indexes
+        const cloneClickables = Array.from(clone.querySelectorAll(clickSelector)).filter(isSemanticallyClickable);
+        // File extension pattern for detection
+        const fileExtPattern = /\b([\w.-]+\.(?:md|txt|js|ts|jsx|tsx|py|rs|go|java|c|cpp|h|css|html|json|yaml|yml|toml|xml|sh|bash|sql|rb|php|swift|kt|scala|r|lua|pl|ex|exs|hs|ml|vue|svelte))\b/i;
+        cloneClickables.forEach((el) => {
+            const selector = buildSelector(el);
+            const bucket = selectorBuckets[selector];
+            if (bucket && bucket.length > 0) {
+                const mappedIndex = bucket.shift();
+                el.setAttribute('data-cdp-click', mappedIndex);
+            }
+
+            // Detect file links only when attached to truly interactive elements
+            const text = (el.textContent || '').trim();
+            const match = text.match(fileExtPattern);
+            const tag = (el.tagName || '').toLowerCase();
+            const role = (el.getAttribute('role') || '').trim().toLowerCase();
+            const looksInteractiveFileTarget = tag === 'a'
+                || tag === 'button'
+                || role === 'link'
+                || role === 'button'
+                || el.hasAttribute('href')
+                || el.hasAttribute('download');
+            if (match && looksInteractiveFileTarget) {
+                el.setAttribute('data-file-name', match[1]);
+            }
+        });
+
         const bodyStyles = window.getComputedStyle(document.body);
 
         // Detect AI completion feedback buttons by their unique data-tooltip-id attributes
@@ -622,6 +679,7 @@ async function discover() {
                     cssHash: null,
                     cssRefreshCounter: 0,
                     snapshotHash: null,
+                    snapshotVersion: 0,
                     quota: null,
                     quotaHash: null,
                     stableCount: 0,
@@ -670,6 +728,7 @@ async function updateSnapshots() {
                     } else {
                         c.snapshot = snap;
                         c.snapshotHash = hash;
+                        c.snapshotVersion = (c.snapshotVersion || 0) + 1;
                         c.contentLength = newLen;
                         c.stableCount = 0;
 
@@ -1181,8 +1240,54 @@ async function main() {
 
     app.get('/snapshot/:id', (req, res) => {
         const c = cascades.get(req.params.id);
-        if (!c || !c.snapshot) return res.status(404).json({ error: 'Not found' });
-        res.json(c.snapshot);
+        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+
+        const clientHash = typeof req.query.hash === 'string'
+            ? req.query.hash
+            : (typeof req.query.snapshotHash === 'string' ? req.query.snapshotHash : null);
+
+        const respond = async () => {
+            if (!c.snapshot) {
+                const snap = await captureHTML(c.cdp);
+                if (snap && typeof snap.html === 'string') {
+                    c.snapshot = snap;
+                    c.snapshotHash = hashString(snap.html);
+                    c.snapshotVersion = (c.snapshotVersion || 0) + 1;
+                    c.contentLength = snap.html.length;
+                }
+            }
+
+            if (!c.snapshot) {
+                return res.status(404).json({ error: 'Not found' });
+            }
+
+            if (!c.snapshotHash) {
+                c.snapshotHash = hashString(c.snapshot.html || '');
+            }
+            if (typeof c.snapshotVersion !== 'number') {
+                c.snapshotVersion = c.snapshot ? 1 : 0;
+            }
+
+            const unchanged = !!clientHash && clientHash === c.snapshotHash;
+            if (unchanged) {
+                return res.json({
+                    snapshotHash: c.snapshotHash,
+                    snapshotVersion: c.snapshotVersion,
+                    unchanged: true
+                });
+            }
+
+            return res.json({
+                ...c.snapshot,
+                snapshotHash: c.snapshotHash,
+                snapshotVersion: c.snapshotVersion,
+                unchanged: false
+            });
+        };
+
+        respond().catch((e) => {
+            res.status(500).json({ error: e.message });
+        });
     });
 
     app.get('/api/quota/:id', (req, res) => {
@@ -1527,20 +1632,60 @@ async function main() {
     // Click passthrough: forward a click to the IDE via CDP
     app.post('/click/:id', async (req, res) => {
         const c = cascades.get(req.params.id);
-        if (!c) return res.status(404).json({ error: 'Cascade not found' });
+        if (!c) {
+            return res.status(404).json({
+                error: 'Cascade not found',
+                reason: 'cascade_not_found'
+            });
+        }
 
-        const idx = req.body.index;
-        const selector = c.snapshot?.clickMap?.[idx];
-        if (!selector) return res.status(400).json({ error: 'Invalid click index' });
+        const idxRaw = req.body.index;
+        const idx = Number(idxRaw);
+        if (!Number.isInteger(idx) || idx < 0) {
+            return res.status(400).json({
+                error: 'Invalid click index',
+                reason: 'invalid_click_index'
+            });
+        }
+
+        if (!c.snapshot || !c.snapshot.clickMap) {
+            return res.status(409).json({
+                error: 'Click map is not ready',
+                reason: 'no_click_map'
+            });
+        }
+
+        if (!c.snapshotHash && c.snapshot?.html) {
+            c.snapshotHash = hashString(c.snapshot.html);
+        }
+
+        const clientSnapshotHash = typeof req.body.snapshotHash === 'string'
+            ? req.body.snapshotHash.trim()
+            : '';
+
+        if (clientSnapshotHash && c.snapshotHash && clientSnapshotHash !== c.snapshotHash) {
+            return res.status(409).json({
+                error: 'Snapshot changed; refresh required',
+                reason: 'stale_snapshot'
+            });
+        }
+
+        const selector = c.snapshot.clickMap[idx];
+        if (!selector) {
+            return res.status(400).json({
+                error: 'Invalid click index',
+                reason: 'invalid_click_index'
+            });
+        }
 
         try {
             // Enhanced: also try to extract the file path from the element context
             const result = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
                     const el = document.querySelector('${selector.replace(/'/g, "\\'")}');
-                    if (!el) return { ok: false, reason: 'element not found' };
+                    if (!el) return { ok: false, reason: 'element_not_found', error: 'Target element not found in IDE DOM' };
                     el.click();
-                    const text = el.textContent.substring(0, 200).trim();
+                    const text = (el.textContent || '').substring(0, 200).trim();
                     // Try to detect file path from nearby context
                     let filePath = null;
                     const href = el.getAttribute('href') || '';
@@ -1560,12 +1705,18 @@ async function main() {
             const val = result.result?.value;
             if (val?.ok) {
                 console.log(`🖱️ Click forwarded: "${val.text}"${val.filePath ? ` (file: ${val.filePath})` : ''}`);
-                res.json({ success: true, text: val.text, filePath: val.filePath });
-            } else {
-                res.status(500).json({ error: val?.reason || 'click failed' });
+                return res.json({ success: true, text: val.text, filePath: val.filePath });
             }
+
+            return res.status(409).json({
+                error: val?.error || 'Click failed in IDE context',
+                reason: val?.reason || 'click_failed'
+            });
         } catch (e) {
-            res.status(500).json({ error: e.message });
+            return res.status(500).json({
+                error: e.message,
+                reason: 'cdp_error'
+            });
         }
     });
 
@@ -1587,16 +1738,73 @@ async function main() {
 
             const result = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
-                    const target = document.getElementById('cascade') || document.getElementById('conversation') || document.getElementById('chat');
-                    if (!target) return { error: 'no target' };
-                    function findScrollable(el, depth) {
-                        if (depth > 8) return null;
+                    const roots = [
+                        document.getElementById('cascade'),
+                        document.getElementById('conversation'),
+                        document.getElementById('chat')
+                    ].filter(Boolean);
+                    if (!roots.length) return { error: 'no target' };
+
+                    const seen = new Set();
+                    const strictCandidates = [];
+                    const relaxedCandidates = [];
+
+                    function isScrollable(el) {
+                        if (!el) return false;
+                        if (el === document.scrollingElement) return el.scrollHeight > el.clientHeight;
                         const s = getComputedStyle(el);
-                        if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) return el;
-                        for (const ch of el.children) { const f = findScrollable(ch, depth + 1); if (f) return f; }
-                        return null;
+                        const overflowY = (s.overflowY || '').toLowerCase();
+                        const canScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+                        return canScroll && el.scrollHeight > el.clientHeight;
                     }
-                    const scrollEl = findScrollable(target, 0);
+
+                    function scoreFor(el, scoreBoost = 0) {
+                        seen.add(el);
+                        const cls = typeof el.className === 'string' ? el.className : '';
+                        const id = (el.id || '').toLowerCase();
+                        let score = (el.scrollHeight - el.clientHeight) + scoreBoost;
+                        if (id === 'cascade' || id === 'conversation' || id === 'chat') score += 400;
+                        if (/scroll|chat|conversation|message|body/i.test(cls)) score += 120;
+                        return score;
+                    }
+
+                    function addCandidate(el, scoreBoost = 0) {
+                        if (!el || seen.has(el)) return;
+                        const scrollableBySize = el.scrollHeight > el.clientHeight;
+                        if (!scrollableBySize) return;
+                        const score = scoreFor(el, scoreBoost);
+                        if (isScrollable(el)) strictCandidates.push({ el, score });
+                        else relaxedCandidates.push({ el, score: score - 60 });
+                    }
+
+                    for (const root of roots) {
+                        // Prefer the root itself and ancestors first
+                        let cur = root;
+                        let depth = 0;
+                        while (cur && depth < 12) {
+                            addCandidate(cur, 300 - depth * 20);
+                            cur = cur.parentElement;
+                            depth++;
+                        }
+
+                        // Then inspect descendants for nested scroll containers
+                        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                        let node = walker.currentNode;
+                        let scanned = 0;
+                        while (node && scanned < 2500) {
+                            addCandidate(node, 80);
+                            node = walker.nextNode();
+                            scanned++;
+                        }
+                    }
+
+                    addCandidate(document.scrollingElement, 40);
+                    const strictBest = strictCandidates.sort((a, b) => b.score - a.score)[0]?.el || null;
+                    const relaxedBest = relaxedCandidates.sort((a, b) => b.score - a.score)[0]?.el || null;
+                    const fallbackRoot = roots
+                        .slice()
+                        .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || null;
+                    const scrollEl = strictBest || relaxedBest || fallbackRoot || document.scrollingElement || document.documentElement;
                     if (!scrollEl) return { error: 'no scrollable element' };
                     ${scrollExpr};
                     return {
@@ -1615,12 +1823,20 @@ async function main() {
             setTimeout(async () => {
                 try {
                     const snap = await captureHTML(c.cdp);
-                    if (snap && snap.html.length > 200) {
+                    if (snap) {
+                        const oldLen = c.contentLength || 0;
+                        const newLen = snap.html.length;
+
+                        if (newLen < 200 && oldLen > 500) {
+                            return;
+                        }
+
                         const hash = hashString(snap.html);
                         if (hash !== c.snapshotHash) {
                             c.snapshot = snap;
                             c.snapshotHash = hash;
-                            c.contentLength = snap.html.length;
+                            c.snapshotVersion = (c.snapshotVersion || 0) + 1;
+                            c.contentLength = newLen;
                             broadcast({ type: 'snapshot_update', cascadeId: c.id });
                         }
                     }
