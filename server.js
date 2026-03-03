@@ -180,6 +180,75 @@ function getJson(url) {
     });
 }
 
+const GENERIC_CHAT_TITLES = new Set([
+    'explore',
+    'explorer',
+    'agent',
+    'chat',
+    'new chat',
+    'new conversation',
+    'conversation',
+    'home',
+    'settings',
+    'search',
+    'source control',
+    'run and debug',
+    'extensions',
+    'terminal'
+]);
+
+function normalizeTitle(title) {
+    return String(title || '').replace(/\s+/g, ' ').trim();
+}
+
+function isGenericChatTitle(title) {
+    const normalized = normalizeTitle(title).toLowerCase();
+    return !normalized || GENERIC_CHAT_TITLES.has(normalized);
+}
+
+function deriveTitleFromWindow(windowTitle) {
+    const normalized = normalizeTitle(windowTitle);
+    if (!normalized) return '';
+
+    const parts = normalized
+        .split(/[—-]/)
+        .map(p => normalizeTitle(p))
+        .filter(Boolean);
+
+    if (parts.length === 0) return '';
+
+    for (const part of parts) {
+        if (!isGenericChatTitle(part)) return part;
+    }
+
+    return parts[0] || '';
+}
+
+function resolveChatTitle({ extractedTitle, previousTitle, windowTitle, cascadeId }) {
+    const extracted = normalizeTitle(extractedTitle);
+    const previous = normalizeTitle(previousTitle);
+    const windowFallback = deriveTitleFromWindow(windowTitle);
+
+    if (extracted && !isGenericChatTitle(extracted)) {
+        return { title: extracted, source: 'extracted' };
+    }
+    if (previous && !isGenericChatTitle(previous)) {
+        return { title: previous, source: 'previous' };
+    }
+    if (windowFallback && !isGenericChatTitle(windowFallback)) {
+        return { title: windowFallback, source: 'window' };
+    }
+    if (previous) {
+        return { title: previous, source: 'previous-generic' };
+    }
+    if (windowFallback) {
+        return { title: windowFallback, source: 'window-generic' };
+    }
+
+    const suffix = String(cascadeId || '').slice(-4) || 'N/A';
+    return { title: `Session ${suffix}`, source: 'fallback-session' };
+}
+
 // --- CDP Logic ---
 
 async function connectCDP(url) {
@@ -233,20 +302,72 @@ async function extractMetadata(cdp) {
         const chat = document.getElementById('chat');
         const conversation = document.getElementById('conversation');
         if (!cascade && !chat && !conversation) return { found: false };
-        
+
+        const root = conversation || chat || cascade || document;
+        const generic = new Set(['explore', 'agent', 'chat', 'new chat', 'new conversation', 'conversation', 'home', 'settings', 'search']);
+        const clean = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+        const valid = (v) => {
+            const t = clean(v);
+            if (t.length < 3 || t.length > 120) return false;
+            return !generic.has(t.toLowerCase());
+        };
+
+        const pickMeaningfulPart = (value) => {
+            const text = clean(value);
+            if (!text) return '';
+            const parts = text.split(/[—-]/).map(clean).filter(Boolean);
+            for (const part of parts) {
+                if (valid(part)) return part;
+            }
+            return valid(text) ? text : '';
+        };
+
+        const fromDocumentTitle = pickMeaningfulPart(document.title);
+
+        const activeTabSelectors = [
+            '.tabs-container .tab.active[aria-selected="true"]',
+            '.editor-tabs-container .tab.active[aria-selected="true"]',
+            '.tab.active[aria-selected="true"]'
+        ];
+        let fromActiveTab = '';
+        for (const sel of activeTabSelectors) {
+            const tab = document.querySelector(sel);
+            if (!tab) continue;
+            const ariaLabel = tab.getAttribute('aria-label') || '';
+            const resourceName = tab.getAttribute('data-resource-name') || '';
+            const text = tab.querySelector('.label-name')?.textContent || tab.textContent || '';
+            fromActiveTab = pickMeaningfulPart(ariaLabel) || pickMeaningfulPart(resourceName) || pickMeaningfulPart(text);
+            if (fromActiveTab) break;
+        }
+
         let chatTitle = null;
-        const possibleTitleSelectors = ['h1', 'h2', 'header', '[class*="title"]', '[class*="Title"]'];
+        const possibleTitleSelectors = [
+            '[data-testid*="conversation-title"]',
+            '[data-testid*="chat-title"]',
+            '[aria-label*="Conversation"]',
+            '[class*="conversation"][class*="title"]',
+            '[class*="chat"][class*="title"]',
+            'h1',
+            'h2',
+            '[class*="title"]',
+            '[class*="Title"]'
+        ];
+
         for (const sel of possibleTitleSelectors) {
-            const el = document.querySelector(sel);
-            if (el && el.textContent.length > 2 && el.textContent.length < 80) {
-                chatTitle = el.textContent.trim();
+            const scoped = root.querySelector(sel);
+            const fallback = scoped ? null : document.querySelector(sel);
+            const el = scoped || fallback;
+            if (el && valid(el.textContent)) {
+                chatTitle = clean(el.textContent);
                 break;
             }
         }
+
+        chatTitle = chatTitle || fromDocumentTitle || fromActiveTab || null;
         
         return {
             found: true,
-            chatTitle: chatTitle || 'Agent',
+            chatTitle,
             isActive: document.hasFocus(),
             mode: cascade ? 'cascade' : 'iframe'
         };
@@ -595,7 +716,9 @@ async function discover() {
     await Promise.all(PORTS.map(async (port) => {
         const list = await getJson(`http://127.0.0.1:${port}/json/list`);
         const workbenches = list.filter(t => t.url?.includes('workbench.html') || t.title?.includes('workbench'));
-        workbenches.forEach(t => allTargets.push({ ...t, port }));
+        workbenches.forEach(t => {
+            allTargets.push({ ...t, port });
+        });
     }));
 
     const newCascades = new Map();
@@ -611,7 +734,18 @@ async function discover() {
                 // Refresh metadata
                 const meta = await extractMetadata(existing.cdp);
                 if (meta) {
-                    existing.metadata = { ...existing.metadata, ...meta };
+                    const resolvedTitle = resolveChatTitle({
+                        extractedTitle: meta.chatTitle,
+                        previousTitle: existing.metadata.chatTitle,
+                        windowTitle: existing.metadata.windowTitle,
+                        cascadeId: id
+                    });
+                    existing.metadata = {
+                        ...existing.metadata,
+                        ...meta,
+                        chatTitle: resolvedTitle.title,
+                        titleSource: resolvedTitle.source
+                    };
                     if (meta.contextId) existing.cdp.rootContextId = meta.contextId; // Update optimization
                     newCascades.set(id, existing);
                     continue;
@@ -627,13 +761,21 @@ async function discover() {
 
             if (meta) {
                 if (meta.contextId) cdp.rootContextId = meta.contextId;
+                const resolvedTitle = resolveChatTitle({
+                    extractedTitle: meta.chatTitle,
+                    previousTitle: '',
+                    windowTitle: target.title,
+                    cascadeId: id
+                });
                 const cascade = {
                     id,
                     cdp,
                     metadata: {
                         windowTitle: target.title,
-                        chatTitle: meta.chatTitle,
-                        isActive: meta.isActive
+                        chatTitle: resolvedTitle.title,
+                        titleSource: resolvedTitle.source,
+                        isActive: meta.isActive,
+                        mode: meta.mode
                     },
                     snapshot: null,
                     css: await captureCSS(cdp),
@@ -647,7 +789,7 @@ async function discover() {
                     lastFeedbackFingerprint: null
                 };
                 newCascades.set(id, cascade);
-                console.log(`✅ Added cascade: ${meta.chatTitle}`);
+                console.log(`✅ Added cascade: ${resolvedTitle.title} (${resolvedTitle.source})`);
             } else {
                 cdp.ws.close();
             }
