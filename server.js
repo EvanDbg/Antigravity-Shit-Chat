@@ -2046,26 +2046,70 @@ async function main() {
         const c = cascades.get(req.params.id);
         if (!c) return res.status(404).json({ error: 'Cascade not found' });
 
-        const { title } = req.body;
+        const { title, selector, triggerIndex } = req.body;
         if (!title) return res.status(400).json({ error: 'No title provided' });
+
+        const clickMapSelector = Number.isInteger(triggerIndex)
+            ? c.snapshot?.clickMap?.[triggerIndex]
+            : null;
 
         try {
             // Find the visible option by text and click it
             const locateResult = await c.cdp.call('Runtime.evaluate', {
                 expression: `(() => {
                   const targetText = ${JSON.stringify(title)};
+                  const targetSelector = ${JSON.stringify(selector || null)};
+                  const triggerSelector = ${JSON.stringify(clickMapSelector || null)};
+
+                  if (targetSelector) {
+                    try {
+                      const direct = document.querySelector(targetSelector);
+                      if (direct) {
+                        const dStyle = window.getComputedStyle(direct);
+                        const dRect = direct.getBoundingClientRect();
+                        if (dStyle.display !== 'none' && dStyle.visibility !== 'hidden' && dRect.height > 0) {
+                          return {
+                            ok: true,
+                            text: (direct.textContent || '').trim(),
+                            cx: dRect.left + dRect.width / 2,
+                            cy: dRect.top + dRect.height / 2,
+                            by: 'selector'
+                          };
+                        }
+                      }
+                    } catch (_) {
+                    }
+                  }
                   
                   // Find the visible popup container (dialog or listbox)
                   // Iterate from LAST to FIRST — newly opened popups are appended at the end
                   const containers = Array.from(document.querySelectorAll('[role="dialog"], [role="listbox"]'));
                   let activeContainer = null;
                   let bestContainer = null; // container whose text contains the target
+
+                  let triggerRect = null;
+                  if (triggerSelector) {
+                    try {
+                      const triggerEl = document.querySelector(triggerSelector);
+                      if (triggerEl) triggerRect = triggerEl.getBoundingClientRect();
+                    } catch (_) {
+                    }
+                  }
                   
                   for (let i = containers.length - 1; i >= 0; i--) {
                     const c = containers[i];
                     const style = window.getComputedStyle(c);
                     if (style.display === 'none' || style.visibility === 'hidden') continue;
                     if (c.getBoundingClientRect().height === 0) continue;
+
+                    if (triggerRect) {
+                      const rect = c.getBoundingClientRect();
+                      const dx = (rect.left + rect.width / 2) - (triggerRect.left + triggerRect.width / 2);
+                      const dy = rect.top - triggerRect.bottom;
+                      if (Math.abs(dx) > window.innerWidth * 0.6 || Math.abs(dy) > window.innerHeight * 0.6) {
+                        continue;
+                      }
+                    }
                     
                     // Prefer the container whose text includes the target
                     if (!bestContainer && (c.textContent || '').includes(targetText)) {
