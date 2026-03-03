@@ -17,6 +17,7 @@ let scrollTimer = null;
 let pendingScrollTop = null;
 let filePreviewRequestSeq = 0;
 let styleApplyRequestSeq = 0;
+let popupOpenRequestSeq = 0;
 
 // Morphdom: loaded as UMD from vendor/
 const morphdomReady = new Promise((resolve) => {
@@ -233,7 +234,7 @@ function preparePopupOverlay() {
 }
 
 // Show popup bubble with items from the /popup API
-function showPopupBubble(items, clickX, clickY) {
+function showPopupBubble(items, clickX, clickY, triggerIndex) {
     const overlay = document.getElementById('mobile-popup-overlay');
     if (!overlay) return;
 
@@ -271,17 +272,30 @@ function showPopupBubble(items, clickX, clickY) {
 
         itemEl.innerHTML = html;
 
-        itemEl.addEventListener('click', () => {
-            // Only remove the overlay — do NOT send /dismiss here
-            // The server-side /popup-click will handle the IDE popup
-            const overlay = document.getElementById('mobile-popup-overlay');
-            if (overlay) overlay.remove();
-            if (item.title) {
-                fetch(`/popup-click/${currentId}`, {
+        itemEl.addEventListener('click', async () => {
+            if (!item.title || !currentId) {
+                dismissPopupBubble();
+                return;
+            }
+            const overlayEl = document.getElementById('mobile-popup-overlay');
+            if (overlayEl) overlayEl.style.pointerEvents = 'none';
+            try {
+                const resp = await fetch(`/popup-click/${currentId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: item.title })
-                }).catch(() => {});
+                    body: JSON.stringify({
+                        title: item.title,
+                        selector: item.selector || null,
+                        triggerIndex: Number.isFinite(triggerIndex) ? triggerIndex : null
+                    })
+                });
+                if (!resp.ok) throw new Error('popup-click failed');
+                dismissPopupBubble();
+                setTimeout(() => {
+                    document.dispatchEvent(new CustomEvent('snapshot-update', { detail: { id: currentId } }));
+                }, 120);
+            } catch (_) {
+                if (overlayEl) overlayEl.style.pointerEvents = '';
             }
         });
 
@@ -296,8 +310,16 @@ function dismissPopupBubble() {
     const overlay = document.getElementById('mobile-popup-overlay');
     if (overlay) {
         overlay.remove();
-        // Close the IDE popup that was left open during extraction
         if (currentId) fetch(`/dismiss/${currentId}`, { method: 'POST' }).catch(() => {});
+    }
+}
+
+function clearNativeDropdownFallback() {
+    const inDoc = document.body.querySelector('.native-dropdown-fallback');
+    if (inDoc) inDoc.remove();
+    if (shadowRoot) {
+        const inShadow = shadowRoot.querySelector('.native-dropdown-fallback');
+        if (inShadow) inShadow.remove();
     }
 }
 
@@ -410,11 +432,10 @@ export async function updateContent(id, signal) {
 
     if (morphdom) {
       // ===== DOM NOISE REDUCTION =====
-      // Strip popup containers from snapshot before morphdom to avoid rendering stale popups
       const nativePopups = Array.from(temp.querySelectorAll('[role="dialog"], [role="listbox"], [role="menu"], .monaco-menu-container, .context-view'));
-      nativePopups.forEach(popup => {
-          popup.innerHTML = '';
-          popup.style.display = 'none';
+      nativePopups.forEach((popup) => {
+        popup.innerHTML = '';
+        popup.style.display = 'none';
       });
 
       morphdom(viewport, temp, {
@@ -615,8 +636,7 @@ document.addEventListener('click', async (e) => {
 // Custom Dropdown Fallback for Native Select/VSCode-Dropdown
 // ------------------------------------------------------------------
 function renderCustomNativeDropdown(el, idx, options) {
-    const old = document.body.querySelector('.native-dropdown-fallback');
-    if (old) old.remove();
+    clearNativeDropdownFallback();
 
     const popup = document.createElement('div');
     popup.className = 'native-dropdown-fallback';
@@ -686,7 +706,7 @@ function renderCustomNativeDropdown(el, idx, options) {
         popup.appendChild(item);
     });
 
-    const viewport = document.getElementById('chat-viewport');
+    const viewport = shadowRoot ? shadowRoot.getElementById('chat-viewport') : null;
     if (viewport) viewport.appendChild(popup);
 }
 
@@ -724,7 +744,56 @@ async function handleCDPClick(e) {
 
   if (!clickable || !currentId) return;
 
+  const tag = clickable.tagName.toUpperCase();
   const idx = clickable.getAttribute('data-cdp-click');
+  const options = Array.from(clickable.querySelectorAll('vscode-option, option'));
+  const popupTrigger = isPopupTrigger(clickable);
+
+  if (popupTrigger) {
+    e.stopPropagation();
+    e.preventDefault();
+    clearNativeDropdownFallback();
+    const reqId = ++popupOpenRequestSeq;
+
+    const rect = clickable.getBoundingClientRect();
+    const anchorX = lastClickEvent ? Math.round(lastClickEvent.clientX) : Math.round(rect.left + (rect.width / 2));
+    const anchorY = lastClickEvent ? Math.round(lastClickEvent.clientY) : Math.round(rect.bottom);
+
+    const overlay = preparePopupOverlay();
+    overlay.dataset.triggerIndex = idx;
+
+    try {
+      const popupRes = await fetch(`/popup/${currentId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: parseInt(idx) })
+      });
+      const popupData = await popupRes.json().catch(() => ({}));
+      const items = Array.isArray(popupData?.items) ? popupData.items : [];
+
+      if (reqId !== popupOpenRequestSeq) return;
+
+      if (!popupRes.ok || items.length === 0) {
+        dismissPopupBubble();
+        return;
+      }
+
+      showPopupBubble(items, anchorX, anchorY, parseInt(idx));
+      return;
+    } catch (_) {
+      dismissPopupBubble();
+      return;
+    }
+  }
+
+  if (options.length > 0 || tag === 'SELECT' || tag === 'VSCODE-DROPDOWN') {
+    e.stopPropagation();
+    e.preventDefault();
+    if (options.length > 0) {
+      renderCustomNativeDropdown(clickable, idx, options);
+    }
+    return;
+  }
 
   lastClickedCdpIndex = idx;
   fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'passing_cdp_click_to_backend', cdpId: idx})}).catch(()=>{});
@@ -774,7 +843,6 @@ async function handleCDPClick(e) {
         });
     }
 
-    // 瞬间广播：无需等待1000ms定时器，强制立即拉取最新 Snapshot，达到弹窗秒关的效果
     document.dispatchEvent(new CustomEvent('snapshot-update', { detail: { id: currentId } }));
 
     await new Promise(r => setTimeout(r, 400));
