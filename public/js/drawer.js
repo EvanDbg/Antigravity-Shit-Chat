@@ -14,6 +14,24 @@ let projectRequestSeq = 0;
 let $drawer, $overlay, $cascadeList, $quotaOverview;
 let $projectModal, $projectList, $projectBreadcrumb, $projectOpenBtn;
 
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getCascadeDisplayTitle(cascade, allCascades) {
+  if (!cascade) return 'Untitled';
+  const baseTitle = (cascade.title || 'Untitled').trim() || 'Untitled';
+  const baseTitleLower = baseTitle.toLowerCase();
+  const duplicateCount = allCascades.filter(c => ((c.title || 'Untitled').trim() || 'Untitled').toLowerCase() === baseTitleLower).length;
+  if (duplicateCount <= 1) return baseTitle;
+  return `${baseTitle} · ${String(cascade.id || '').slice(-4)}`;
+}
+
 // ------------------------------------------------------------------
 // Toggle
 // ------------------------------------------------------------------
@@ -47,10 +65,12 @@ function renderCascadeList(cascades, currentCascadeId) {
   $cascadeList.innerHTML = cascades.map(c => {
     const isActive = c.id === currentCascadeId;
     const dotClass = c.active ? 'active' : '';
+    const displayTitle = getCascadeDisplayTitle(c, cascades);
+    const safeTitle = escapeHtml(displayTitle);
     return `
       <div class="cascade-item ${isActive ? 'active' : ''}" data-cascade-id="${c.id}">
         <span class="status-dot ${dotClass}"></span>
-        <span class="cascade-title">${c.title || 'Untitled'}</span>
+        <span class="cascade-title" title="${safeTitle}">${safeTitle}</span>
         <button class="cascade-close" data-close-cascade="${c.id}" title="Close">×</button>
       </div>`;
   }).join('');

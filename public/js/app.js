@@ -13,6 +13,15 @@ let currentCascadeId = null;
 let ws = null;
 const quotaCache = {};
 
+function getCascadeDisplayTitle(cascade, allCascades) {
+  if (!cascade) return 'Antigravity';
+  const baseTitle = (cascade.title || 'Untitled').trim() || 'Untitled';
+  const baseTitleLower = baseTitle.toLowerCase();
+  const duplicateCount = allCascades.filter(c => ((c.title || 'Untitled').trim() || 'Untitled').toLowerCase() === baseTitleLower).length;
+  if (duplicateCount <= 1) return baseTitle;
+  return `${baseTitle} · ${String(cascade.id || '').slice(-4)}`;
+}
+
 // --- DOM refs (resolved after DOMContentLoaded) ---
 let $chatHost, $topbarTitle, $sendBtn, $messageInput;
 let $loginScreen, $appShell, $loginBtn, $loginPassword;
@@ -110,9 +119,12 @@ function connect() {
 // Cascade list (rendered in drawer, title updated in topbar)
 // ------------------------------------------------------------------
 function renderCascadeList() {
-  $topbarTitle.textContent = cascades.length > 0
-    ? (cascades.find(c => c.id === currentCascadeId)?.title || cascades[0].title || 'Antigravity')
-    : 'No sessions';
+  if (cascades.length > 0) {
+    const selected = cascades.find(c => c.id === currentCascadeId) || cascades[0];
+    $topbarTitle.textContent = getCascadeDisplayTitle(selected, cascades);
+  } else {
+    $topbarTitle.textContent = 'No sessions';
+  }
 
   // Dispatch event for drawer to update
   document.dispatchEvent(new CustomEvent('cascades-updated', { detail: { cascades, currentCascadeId } }));
@@ -132,7 +144,8 @@ function renderCascadeList() {
 
 export function selectCascade(id) {
   currentCascadeId = id;
-  $topbarTitle.textContent = cascades.find(c => c.id === id)?.title || 'Antigravity';
+  const selected = cascades.find(c => c.id === id);
+  $topbarTitle.textContent = getCascadeDisplayTitle(selected, cascades);
   document.dispatchEvent(new CustomEvent('cascade-selected', { detail: { id } }));
   document.dispatchEvent(new CustomEvent('cascades-updated', { detail: { cascades, currentCascadeId } }));
 }
@@ -237,8 +250,12 @@ function setupViewRouting() {
   document.querySelectorAll('.bottomnav-item').forEach(btn => {
     btn.addEventListener('click', () => {
       const targetView = btn.dataset.view;
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-      document.querySelectorAll('.bottomnav-item').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(v => {
+        v.classList.remove('active');
+      });
+      document.querySelectorAll('.bottomnav-item').forEach(b => {
+        b.classList.remove('active');
+      });
       document.getElementById(targetView)?.classList.add('active');
       btn.classList.add('active');
     });
@@ -266,7 +283,9 @@ function setupModalClose() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+      document.querySelectorAll('.modal-overlay.active').forEach(m => {
+        m.classList.remove('active');
+      });
     }
   });
 }
