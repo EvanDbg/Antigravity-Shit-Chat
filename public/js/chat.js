@@ -16,6 +16,7 @@ window.addEventListener('click', (e) => {
 let scrollTimer = null;
 let pendingScrollTop = null;
 let filePreviewRequestSeq = 0;
+let styleApplyRequestSeq = 0;
 
 // Morphdom: loaded as UMD from vendor/
 const morphdomReady = new Promise((resolve) => {
@@ -88,6 +89,7 @@ async function loadChatThemeCSS() {
       const css = await res.text();
       const style = shadowRoot.getElementById('theme-override');
       if (style) style.textContent = css;
+      setSnapshotTheme(getSnapshotTheme(), { force: true });
     }
   } catch (_) { }
   _themeLoading = false;
@@ -98,11 +100,13 @@ async function loadChatThemeCSS() {
 // ------------------------------------------------------------------
 export async function applyCascadeStyles(id, signal) {
   if (!shadowRoot) return;
+  const requestSeq = ++styleApplyRequestSeq;
   try {
     const res = await fetch(`/styles/${id}`, { signal });
     if (!res.ok) return;
     const data = await res.json();
     if (!data) return;
+    if (requestSeq !== styleApplyRequestSeq) return;
     const vars = data.computedVars || {};
 
     let varDecls = '';
@@ -204,7 +208,7 @@ export async function applyCascadeStyles(id, signal) {
 
     // Re-apply the user's preferred theme class in case DOM reconstruction dropped it
     // or new variables need the higher specificity of the theme class to take effect
-    setSnapshotTheme(getSnapshotTheme());
+    setSnapshotTheme(getSnapshotTheme(), { force: true });
 
   } catch (e) {
     console.error('CSS refresh failed:', e);
@@ -458,25 +462,48 @@ export async function updateContent(id, signal) {
       img.onerror = () => { img.style.display = 'none'; };
     });
 
-    // Strip inline dark backgrounds from container elements when theme override is active
-    // Only target layout containers, preserve styling on code/pre/button/badge/svg
     const theme = getSnapshotTheme();
-    if (theme !== 'follow') {
+    if (theme === 'light') {
       const skipTags = new Set(['CODE','PRE','BUTTON','A','SVG','PATH','IMG','INPUT','SELECT','TEXTAREA','CANVAS']);
       viewport.querySelectorAll('[style]').forEach(el => {
         if (skipTags.has(el.tagName)) return;
-        // Only strip backgrounds that look dark (rgb values < 80)
         const bg = el.style.backgroundColor;
         if (bg) {
           const match = bg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
-          if (match && parseInt(match[1]) < 80 && parseInt(match[2]) < 80 && parseInt(match[3]) < 80) {
+          const rgbaMatch = bg.match(/rgba\((\d+),\s*(\d+),\s*(\d+)/);
+          const hexMatch = bg.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+          const isDarkRgb = match && parseInt(match[1]) < 80 && parseInt(match[2]) < 80 && parseInt(match[3]) < 80;
+          const isDarkRgba = rgbaMatch && parseInt(rgbaMatch[1]) < 80 && parseInt(rgbaMatch[2]) < 80 && parseInt(rgbaMatch[3]) < 80;
+          const isDarkHex = hexMatch && (() => {
+            const hex = hexMatch[1].length === 3
+              ? hexMatch[1].split('').map(ch => ch + ch).join('')
+              : hexMatch[1];
+            const r = parseInt(hex.slice(0, 2), 16);
+            const g = parseInt(hex.slice(2, 4), 16);
+            const b = parseInt(hex.slice(4, 6), 16);
+            return r < 80 && g < 80 && b < 80;
+          })();
+          if (isDarkRgb || isDarkRgba || isDarkHex) {
             el.style.removeProperty('background-color');
           }
         }
         const bgProp = el.style.background;
         if (bgProp) {
           const match = bgProp.match(/rgb\((\d+),\s*(\d+),\s*(\d+)/);
-          if (match && parseInt(match[1]) < 80 && parseInt(match[2]) < 80 && parseInt(match[3]) < 80) {
+          const rgbaMatch = bgProp.match(/rgba\((\d+),\s*(\d+),\s*(\d+)/);
+          const hexMatch = bgProp.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+          const isDarkRgb = match && parseInt(match[1]) < 80 && parseInt(match[2]) < 80 && parseInt(match[3]) < 80;
+          const isDarkRgba = rgbaMatch && parseInt(rgbaMatch[1]) < 80 && parseInt(rgbaMatch[2]) < 80 && parseInt(rgbaMatch[3]) < 80;
+          const isDarkHex = hexMatch && (() => {
+            const hex = hexMatch[1].length === 3
+              ? hexMatch[1].split('').map(ch => ch + ch).join('')
+              : hexMatch[1];
+            const r = parseInt(hex.slice(0, 2), 16);
+            const g = parseInt(hex.slice(2, 4), 16);
+            const b = parseInt(hex.slice(4, 6), 16);
+            return r < 80 && g < 80 && b < 80;
+          })();
+          if (isDarkRgb || isDarkRgba || isDarkHex) {
             el.style.removeProperty('background');
           }
         }
@@ -544,7 +571,7 @@ export async function updateContent(id, signal) {
     }
     
     // Re-apply theme class stripped by morphdom during HTML diffing
-    setSnapshotTheme(getSnapshotTheme());
+    setSnapshotTheme(getSnapshotTheme(), { force: true });
   } catch (_) { }
 }
 
@@ -963,7 +990,9 @@ function handleScrollSync() {
 // ------------------------------------------------------------------
 // Theme override (three-mode) — idempotent, single source of truth
 // ------------------------------------------------------------------
-export function setSnapshotTheme(mode) {
+export function setSnapshotTheme(mode, options = {}) {
+  const { force = false } = options;
+  const nextMode = mode === 'light' || mode === 'dark' || mode === 'follow' ? mode : 'follow';
   if (!shadowRoot) return;
   const viewport = shadowRoot.getElementById('chat-viewport');
   if (!viewport) return;
@@ -971,7 +1000,7 @@ export function setSnapshotTheme(mode) {
   // Idempotency: skip if theme class already matches target
   const currentClass = viewport.classList.contains('theme-light') ? 'light'
     : viewport.classList.contains('theme-dark') ? 'dark' : 'follow';
-  if (currentClass === mode) return;
+  if (!force && currentClass === nextMode) return;
 
   const style = shadowRoot.getElementById('theme-override');
   // Safety net: if theme CSS failed to load during init, retry once
@@ -980,13 +1009,35 @@ export function setSnapshotTheme(mode) {
   }
 
   viewport.classList.remove('theme-light', 'theme-dark');
-  if (mode === 'light') {
+  if (nextMode === 'light') {
     viewport.classList.add('theme-light');
-  } else if (mode === 'dark') {
+    viewport.style.setProperty('color-scheme', 'light');
+    viewport.style.setProperty('--theme-bc', '#ffffff');
+    viewport.style.setProperty('--theme-fc', '#1f2328');
+    viewport.style.setProperty('--theme-heading', '#000000');
+    viewport.style.setProperty('--theme-pre-bg', '#f0f2f5');
+    viewport.style.setProperty('--theme-code-bg', '#e3e6ea');
+    viewport.style.setProperty('--theme-code-fc', '#1f2328');
+  } else if (nextMode === 'dark') {
     viewport.classList.add('theme-dark');
+    viewport.style.setProperty('color-scheme', 'dark');
+    viewport.style.setProperty('--theme-bc', '#0f0f0f');
+    viewport.style.setProperty('--theme-fc', '#e5e5e5');
+    viewport.style.setProperty('--theme-heading', '#f3f4f6');
+    viewport.style.setProperty('--theme-pre-bg', '#111827');
+    viewport.style.setProperty('--theme-code-bg', '#0b1220');
+    viewport.style.setProperty('--theme-code-fc', '#e5e7eb');
+  } else {
+    viewport.style.removeProperty('color-scheme');
+    viewport.style.removeProperty('--theme-bc');
+    viewport.style.removeProperty('--theme-fc');
+    viewport.style.removeProperty('--theme-heading');
+    viewport.style.removeProperty('--theme-pre-bg');
+    viewport.style.removeProperty('--theme-code-bg');
+    viewport.style.removeProperty('--theme-code-fc');
   }
 
-  localStorage.setItem('snapshot-theme', mode);
+  localStorage.setItem('snapshot-theme', nextMode);
 }
 
 export function getSnapshotTheme() {

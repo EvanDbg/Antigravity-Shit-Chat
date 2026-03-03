@@ -218,11 +218,122 @@
   background: #0f0f0f !important;
   color: #e5e5e5 !important;
   --vscode-editorWidget-background: #0f0f0f;
+  --vscode-panel-border: #2f2f2f;
+  --vscode-widget-border: #2f2f2f;
+  --vscode-editorGroup-border: #2f2f2f;
+  --vscode-sideBar-border: #2f2f2f;
+  --vscode-contrastBorder: #2f2f2f;
+  --vscode-editorWidget-border: #2f2f2f;
+  --vscode-input-border: #3a3a3a;
+  --vscode-focusBorder: #4ea1ff;
   --vscode-list-hoverBackground: rgba(255, 255, 255, 0.1);
   --vscode-list-hoverForeground: #e5e5e5;
   --vscode-list-activeSelectionBackground: #0078d4;
   --vscode-list-activeSelectionForeground: #ffffff;
 }
+#chat-viewport.theme-dark #cascade,
+#chat-viewport.theme-dark #conversation,
+#chat-viewport.theme-dark #chat {
+  background: transparent !important;
+  color: #e5e5e5 !important;
+}
+#chat-viewport.theme-dark, #chat-viewport.theme-dark * {
+  text-decoration: none !important;
+}
 #chat-viewport.theme-dark p, #chat-viewport.theme-dark span, #chat-viewport.theme-dark div,
 #chat-viewport.theme-dark li, #chat-viewport.theme-dark h1, #chat-viewport.theme-dark h2,
 #chat-viewport.theme-dark h3, #chat-viewport.theme-dark a { color: inherit !important; }
+
+#chat-viewport.theme-dark .sticky,
+#chat-viewport.theme-dark [class*="sticky"],
+#chat-viewport.theme-dark [style*="sticky"] {
+  background-color: #0f0f0f !important;
+  z-index: 10 !important;
+}
+
+#chat-viewport.theme-dark a {
+  color: #60a5fa !important;
+}
+
+#chat-viewport.theme-dark h1, #chat-viewport.theme-dark h2, #chat-viewport.theme-dark h3,
+#chat-viewport.theme-dark h4, #chat-viewport.theme-dark h5, #chat-viewport.theme-dark h6 {
+  color: #f3f4f6 !important;
+  font-weight: 600 !important;
+}
+
+#chat-viewport.theme-dark .prose, #chat-viewport.theme-dark [class*="prose"] {
+  --tw-prose-body: #e5e5e5 !important;
+  --tw-prose-headings: #f3f4f6 !important;
+  --tw-prose-bold: #f3f4f6 !important;
+  --tw-prose-code: #e5e5e5 !important;
+  --tw-prose-pre-bg: #111827 !important;
+  --tw-prose-links: #60a5fa !important;
+  color: #e5e5e5 !important;
+}
+
+#chat-viewport.theme-dark pre {
+  background: #111827 !important;
+  color: #e5e5e5 !important;
+  border: 1px solid #2f2f2f !important;
+  border-radius: 6px !important;
+  padding: 12px !important;
+}
+
+#chat-viewport.theme-dark pre code {
+  background: transparent !important;
+  color: inherit !important;
+  border: none !important;
+  padding: 0 !important;
+}
+
+#chat-viewport.theme-dark code {
+  background: #0b1220 !important;
+  color: #e5e7eb !important;
+  border: 1px solid #2f2f2f !important;
+  border-radius: 4px !important;
+  padding: 1px 5px !important;
+  font-size: 0.9em !important;
+}
+
+#chat-viewport.theme-dark table {
+  border-collapse: collapse !important;
+  border: 1px solid #2f2f2f !important;
+}
+
+#chat-viewport.theme-dark th, #chat-viewport.theme-dark td {
+  border: 1px solid #2f2f2f !important;
+  padding: 6px 12px !important;
+}
+
+#chat-viewport.theme-dark th {
+  background: #161f2f !important;
+  font-weight: 600 !important;
+}
+
+#chat-viewport.theme-dark hr {
+  border-color: #2f2f2f !important;
+}
+
+#chat-viewport.theme-dark .border:not(button):not([role="button"]):not(a):not(code):not(pre) {
+  border-width: 1px !important;
+  border-style: solid !important;
+  border-color: #2f2f2f !important;
+}
+
+#chat-viewport.theme-dark [class*="badge"],
+#chat-viewport.theme-dark [class*="tag"],
+#chat-viewport.theme-dark [class*="chip"] {
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+  border: 1px solid #2f2f2f !important;
+}
+
+#chat-viewport.theme-dark svg {
+  color: inherit !important;
+}
+
+#chat-viewport.theme-dark pre,
+#chat-viewport.theme-dark table {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+}
