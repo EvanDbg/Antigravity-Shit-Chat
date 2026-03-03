@@ -162,6 +162,12 @@ async function sendMessage() {
   }
 }
 
+function isSendShortcut(e) {
+  if (e.key !== 'Enter') return false;
+  if (e.isComposing || e.keyCode === 229) return false;
+  return e.metaKey || e.ctrlKey;
+}
+
 // ------------------------------------------------------------------
 // Launch Antigravity
 // ------------------------------------------------------------------
@@ -322,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Send message
   $sendBtn.addEventListener('click', sendMessage);
   $messageInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (isSendShortcut(e)) {
       e.preventDefault();
       sendMessage();
     }
