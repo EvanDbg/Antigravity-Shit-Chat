@@ -15,6 +15,7 @@ window.addEventListener('click', (e) => {
 
 let scrollTimer = null;
 let pendingScrollTop = null;
+let filePreviewRequestSeq = 0;
 
 // Morphdom: loaded as UMD from vendor/
 const morphdomReady = new Promise((resolve) => {
@@ -688,87 +689,15 @@ async function handleCDPClick(e) {
   
   for (const el of path) {
     if (el.nodeType !== 1) continue;
-    
-    const tag = el.tagName.toUpperCase();
-    const role = el.getAttribute?.('role') || '';
-
-    // 1. Explicitly blocked elements where native behavior OR selection should dominate
-    if (/^(CODE|PRE|TABLE|THEAD|TBODY|TR|TH|TD|SUMMARY|DETAILS|INPUT|TEXTAREA)$/.test(tag)) {
-      fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'blocked_by_tag', tag})}).catch(()=>{});
-      return; 
-    }
-
-    // 2. We hit an element mapped to CDP
     if (el.hasAttribute?.('data-cdp-click')) {
-      const cls = el.className || '';
-      
-      // A valid button DIV shouldn't contain heavy block elements like paragraphs, code blocks, or tables
-      const isContainerDiv = el.querySelector('p, pre, table, ul, ol, iframe, code');
-      
-      // Only honor it if it's an actionable UI tag OR it looks like a custom button container
-      if (/^(A|BUTTON|SPAN|I|SVG|PATH|SELECT|VSCODE-DROPDOWN)$/.test(tag) || 
-          /^(button|menuitem|option|combobox|listbox|tab)$/i.test(role) ||
-          (tag === 'DIV' && typeof cls === 'string' && /pointer|btn|button|action|clickable|menu|toolbar|select|dropdown|backdrop|overlay|dialog|context-view/i.test(cls) && !isContainerDiv)) {
-        clickable = el;
-      } else {
-        fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'ignored_cdp_element', tag, cls, role, isContainerDiv: !!isContainerDiv})}).catch(()=>{});
-      }
-      break; 
+      clickable = el;
+      break;
     }
   }
 
   if (!clickable || !currentId) return;
 
-  const tag = clickable.tagName.toUpperCase();
   const idx = clickable.getAttribute('data-cdp-click');
-
-  // If clicked element contains manual options, expose them as a native UI overlay
-  const options = Array.from(clickable.querySelectorAll('vscode-option, option'));
-  
-  fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'checking_options', tag, optionsFound: options.length, outerHTML: clickable.outerHTML?.slice(0, 200)})}).catch(()=>{});
-
-  if (options.length > 0 || tag === 'SELECT' || tag === 'VSCODE-DROPDOWN') {
-      e.stopPropagation();
-      e.preventDefault();
-      fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'intercepted_as_native_dropdown', tag, optionsCount: options.length})}).catch(()=>{});
-      if (options.length > 0) {
-          renderCustomNativeDropdown(clickable, idx, options);
-      } else {
-          fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'empty_dropdown_intercepted'})}).catch(()=>{});
-      }
-      return;
-  }
-
-  // ===== POPUP TRIGGER PATH =====
-  // If the element looks like a popup trigger (dropdown, model selector, mode button),
-  // use the dedicated /popup API instead of morphdom-based extraction
-  if (isPopupTrigger(clickable)) {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      const clickX = lastClickEvent ? lastClickEvent.clientX : window.innerWidth / 2;
-      const clickY = lastClickEvent ? lastClickEvent.clientY : window.innerHeight / 2;
-      
-      // Prepare invisible overlay (no loading state shown)
-      const overlay = preparePopupOverlay();
-      overlay.dataset.triggerIndex = idx;
-      overlay.dataset.clickX = clickX;
-      overlay.dataset.clickY = clickY;
-      
-      // Request popup content and show directly when ready
-      try {
-          const res = await fetch(`/popup/${currentId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ index: parseInt(idx) })
-          });
-          const data = await res.json();
-          showPopupBubble(data.items, clickX, clickY);
-      } catch (err) {
-          dismissPopupBubble();
-      }
-      return;
-  }
 
   lastClickedCdpIndex = idx;
   fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'passing_cdp_click_to_backend', cdpId: idx})}).catch(()=>{});
@@ -812,8 +741,10 @@ async function handleCDPClick(e) {
     });
 
     // 主动即刻隐藏当前所点击的具有弹窗背景性质的遮罩及浮层组合，配合后端刷新制造出无缝消失感
-    if (clickable.tagName.toUpperCase() === 'DIV' && /backdrop|overlay/.test(clickable.className)) {
-        document.querySelectorAll('#chat-viewport [role="menu"], #chat-viewport [role="listbox"], #chat-viewport .context-view, #chat-viewport [data-radix-popper-content-wrapper], #chat-viewport .monaco-menu-container').forEach(el => el.style.display = 'none');
+    if (clickable.tagName.toUpperCase() === 'DIV' && /backdrop|overlay/.test(clickable.className || '')) {
+        document.querySelectorAll('#chat-viewport [role="menu"], #chat-viewport [role="listbox"], #chat-viewport .context-view, #chat-viewport [data-radix-popper-content-wrapper], #chat-viewport .monaco-menu-container').forEach(el => {
+          el.style.display = 'none';
+        });
     }
 
     // 瞬间广播：无需等待1000ms定时器，强制立即拉取最新 Snapshot，达到弹窗秒关的效果
@@ -823,18 +754,138 @@ async function handleCDPClick(e) {
 
     // Decide whether to show file preview
     if (hasFileName) {
-      document.dispatchEvent(new CustomEvent('open-file-preview'));
+      document.dispatchEvent(new CustomEvent('open-file-preview', {
+        detail: {
+          fileName: clickable.getAttribute('data-file-name') || null,
+          source: 'file-link'
+        }
+      }));
     } else {
       const afterRes = await fetch(`/api/active-tab-name/${currentId}`);
       const afterTab = await afterRes.json();
       if (afterTab.name && afterTab.name !== beforeTab?.name) {
-        document.dispatchEvent(new CustomEvent('open-file-preview'));
+        document.dispatchEvent(new CustomEvent('open-file-preview', {
+          detail: {
+            fileName: afterTab.name || null,
+            source: 'tab-change'
+          }
+        }));
       }
     }
   } catch (err) {
     console.error('Click passthrough error:', err);
   } finally {
     setTimeout(() => { clickable.style.opacity = ''; }, 300);
+  }
+}
+
+function getFilePreviewDom() {
+  return {
+    modal: document.getElementById('filePreviewModal'),
+    nameEl: document.getElementById('filePreviewName'),
+    bodyEl: document.getElementById('filePreviewBody')
+  };
+}
+
+function renderPlainFilePreview(content, ext = '') {
+  const lang = (ext || 'plaintext').replace(/[^a-z0-9_+-]/gi, '').toLowerCase() || 'plaintext';
+  return `<pre><code class="language-${lang}">${escapeHtml(content || '')}</code></pre>`;
+}
+
+function sanitizePreviewHtml(html) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(String(html || ''), 'text/html');
+    doc.querySelectorAll('script, iframe, object, embed, style, link, meta').forEach((node) => {
+      node.remove();
+    });
+
+    doc.body.querySelectorAll('*').forEach((el) => {
+      const attrs = Array.from(el.attributes || []);
+      attrs.forEach((attr) => {
+        const name = (attr.name || '').toLowerCase();
+        const value = String(attr.value || '').trim();
+        if (name.startsWith('on')) {
+          el.removeAttribute(attr.name);
+          return;
+        }
+        if ((name === 'href' || name === 'src') && /^javascript:/i.test(value)) {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+    return doc.body.innerHTML;
+  } catch (_) {
+    return '';
+  }
+}
+
+function renderMarkdownPreview(content) {
+  const md = String(content || '');
+  const markedImpl = window.marked;
+  if (!markedImpl) {
+    return renderPlainFilePreview(md, 'md');
+  }
+
+  try {
+    const html = typeof markedImpl.parse === 'function'
+      ? markedImpl.parse(md)
+      : (typeof markedImpl === 'function' ? markedImpl(md) : '');
+    if (!html) return renderPlainFilePreview(md, 'md');
+    return `<div class="markdown-content">${sanitizePreviewHtml(html)}</div>`;
+  } catch (_) {
+    return renderPlainFilePreview(md, 'md');
+  }
+}
+
+function highlightPreviewCode(container) {
+  if (!container || !window.hljs) return;
+  container.querySelectorAll('pre code').forEach((block) => {
+    try {
+      window.hljs.highlightElement(block);
+    } catch (_) { }
+  });
+}
+
+async function handleOpenFilePreview(e) {
+  if (!currentId) return;
+  const { modal, nameEl, bodyEl } = getFilePreviewDom();
+  if (!modal || !nameEl || !bodyEl) return;
+
+  const hintName = (e?.detail?.fileName || '').trim();
+  const reqId = ++filePreviewRequestSeq;
+  nameEl.textContent = hintName || 'Loading...';
+  bodyEl.innerHTML = '<p class="text-muted">Loading preview...</p>';
+  modal.classList.add('active');
+
+  try {
+    const res = await fetch(`/api/active-file/${currentId}`);
+    const data = await res.json().catch(() => ({}));
+
+    if (reqId !== filePreviewRequestSeq) return;
+    if (!res.ok) {
+      throw new Error(data.error || `Preview failed (${res.status})`);
+    }
+
+    if (data.type === 'artifact' && data.html) {
+      nameEl.textContent = data.name || hintName || 'Artifact Preview';
+      bodyEl.innerHTML = `<div class="markdown-content">${sanitizePreviewHtml(data.html)}</div>`;
+      highlightPreviewCode(bodyEl);
+      return;
+    }
+
+    const filename = data.filename || hintName || 'Preview';
+    const ext = (data.ext || '').toLowerCase();
+    const isMarkdown = ext === 'md' || /\.md$/i.test(filename);
+
+    nameEl.textContent = filename;
+    bodyEl.innerHTML = isMarkdown
+      ? renderMarkdownPreview(data.content || '')
+      : renderPlainFilePreview(data.content || '', ext);
+    highlightPreviewCode(bodyEl);
+  } catch (err) {
+    if (reqId !== filePreviewRequestSeq) return;
+    bodyEl.innerHTML = `<p class="text-muted">Preview unavailable</p><pre><code>${escapeHtml(err?.message || 'Unknown error')}</code></pre>`;
   }
 }
 
@@ -973,6 +1024,8 @@ document.addEventListener('snapshot-update', (e) => {
 document.addEventListener('css-update', (e) => {
   if (e.detail.id === currentId) applyCascadeStyles(currentId);
 });
+
+document.addEventListener('open-file-preview', handleOpenFilePreview);
 
 // Init on DOM ready
 document.addEventListener('DOMContentLoaded', initChatView);
