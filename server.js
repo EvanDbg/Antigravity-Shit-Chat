@@ -249,6 +249,17 @@ function resolveChatTitle({ extractedTitle, previousTitle, windowTitle, cascadeI
     return { title: `Session ${suffix}`, source: 'fallback-session' };
 }
 
+function cascadeListSignature(cascadeMap) {
+    const list = Array.from(cascadeMap.values())
+        .map(c => ({
+            id: c.id,
+            title: normalizeTitle(c.metadata?.chatTitle),
+            active: !!c.metadata?.isActive
+        }))
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    return JSON.stringify(list);
+}
+
 // --- CDP Logic ---
 
 async function connectCDP(url) {
@@ -737,12 +748,13 @@ async function discover() {
                     const resolvedTitle = resolveChatTitle({
                         extractedTitle: meta.chatTitle,
                         previousTitle: existing.metadata.chatTitle,
-                        windowTitle: existing.metadata.windowTitle,
+                        windowTitle: target.title || existing.metadata.windowTitle,
                         cascadeId: id
                     });
                     existing.metadata = {
                         ...existing.metadata,
                         ...meta,
+                        windowTitle: target.title || existing.metadata.windowTitle,
                         chatTitle: resolvedTitle.title,
                         titleSource: resolvedTitle.source
                     };
@@ -806,7 +818,9 @@ async function discover() {
         }
     }
 
-    const changed = cascades.size !== newCascades.size; // Simple check, could be more granular
+    const prevSignature = cascadeListSignature(cascades);
+    const nextSignature = cascadeListSignature(newCascades);
+    const changed = prevSignature !== nextSignature;
     cascades = newCascades;
 
     if (changed) broadcastCascadeList();
