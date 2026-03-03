@@ -34,7 +34,7 @@
       <h1>Antigravity</h1>
       <p>Remote Dev Monitor</p>
       <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
-      <button id="loginBtn">Sign In</button>
+      <button type="button" id="loginBtn">Sign In</button>
     </div>
   </div>
 
@@ -43,7 +43,7 @@
 
     <!-- Top Bar -->
     <header class="topbar">
-      <button class="topbar-menu" id="drawerToggle" aria-label="Menu">☰</button>
+      <button type="button" class="topbar-menu" id="drawerToggle" aria-label="Menu">☰</button>
       <span class="topbar-title" id="topbarTitle">Connecting...</span>
     </header>
 
@@ -63,9 +63,10 @@
       </div>
       <hr class="drawer-divider">
       <div class="drawer-actions">
-        <button class="drawer-action" id="newConvBtn">＋ New Chat</button>
-        <button class="drawer-action" id="launchBtn">🚀 Launch IDE</button>
-        <button class="drawer-action danger" id="killBtn">⏻ Kill All</button>
+        <button type="button" class="drawer-action" id="newConvBtn">＋ New Chat</button>
+        <button type="button" class="drawer-action" id="launchBtn">🚀 Launch IDE</button>
+        <button type="button" class="drawer-action" id="openProjectBtn">📂 Open Project</button>
+        <button type="button" class="drawer-action danger" id="killBtn">⏻ Kill All</button>
       </div>
     </aside>
 
@@ -81,8 +82,9 @@
       <!-- Input Area -->
       <div class="input-area">
         <textarea id="messageInput" placeholder="Send a message..." rows="1"></textarea>
-        <button class="send-btn" id="sendBtn" aria-label="Send">
+        <button type="button" class="send-btn" id="sendBtn" aria-label="Send">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <title>Send</title>
             <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
           </svg>
         </button>
@@ -117,14 +119,16 @@
 
     <!-- Bottom Navigation -->
     <nav class="bottomnav">
-      <button class="bottomnav-item active" data-view="viewChat" id="navChat">
+      <button type="button" class="bottomnav-item active" data-view="viewChat" id="navChat">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <title>Chat</title>
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </svg>
         <span>Chat</span>
       </button>
-      <button class="bottomnav-item" data-view="viewMore" id="navMore">
+      <button type="button" class="bottomnav-item" data-view="viewMore" id="navMore">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <title>More</title>
           <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
         </svg>
         <span>More</span>
@@ -136,7 +140,7 @@
       <div class="modal-card">
         <div class="modal-header">
           <h2>Account Manager</h2>
-          <button class="modal-close" data-close="acctModal">✕</button>
+          <button type="button" class="modal-close" data-close="acctModal">✕</button>
         </div>
         <div class="modal-body" id="acctModalBody">
           <p class="text-muted">Loading accounts...</p>
@@ -148,7 +152,7 @@
       <div class="modal-card modal-card-full">
         <div class="modal-header">
           <span id="filePreviewName">file.md</span>
-          <button class="modal-close" data-close="filePreviewModal">✕</button>
+          <button type="button" class="modal-close" data-close="filePreviewModal">✕</button>
         </div>
         <div class="modal-body modal-body-scroll" id="filePreviewBody">
           <p class="text-muted">Loading...</p>
@@ -160,15 +164,15 @@
       <div class="modal-card">
         <div class="modal-header">
           <h2>Open Project</h2>
-          <button class="modal-close" data-close="projectModal">✕</button>
+          <button type="button" class="modal-close" data-close="projectModal">✕</button>
         </div>
         <div id="projectBreadcrumb" class="breadcrumb"></div>
         <div class="modal-body" id="projectList">
           <p class="text-muted">Initializing...</p>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" data-close="projectModal">Cancel</button>
-          <button class="btn btn-primary" id="projectOpenBtn">Open</button>
+          <button type="button" class="btn btn-secondary" data-close="projectModal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="projectOpenBtn" disabled>Open</button>
         </div>
       </div>
     </div>
