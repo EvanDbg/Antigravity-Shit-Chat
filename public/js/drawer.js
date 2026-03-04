@@ -47,6 +47,13 @@ function closeDrawer() {
   $overlay?.classList.remove('active');
 }
 
+function normalizeDrawerOverlayState(forceClosed = false) {
+  const drawerOpen = !forceClosed && !!$drawer?.classList.contains('open');
+  isOpen = drawerOpen;
+  if ($drawer) $drawer.classList.toggle('open', drawerOpen);
+  if ($overlay) $overlay.classList.toggle('active', drawerOpen);
+}
+
 function toggleDrawer() {
   isOpen ? closeDrawer() : openDrawer();
 }
@@ -124,7 +131,6 @@ function handleCascadeClick(e) {
   const item = e.target.closest('[data-cascade-id]');
   if (item) {
     selectCascade(item.dataset.cascadeId);
-    closeDrawer();
   }
 }
 
@@ -415,6 +421,11 @@ document.addEventListener('DOMContentLoaded', () => {
 // Listen for state updates from app.js
 document.addEventListener('cascades-updated', (e) => {
   const { cascades, currentCascadeId } = e.detail;
+  normalizeDrawerOverlayState();
   renderCascadeList(cascades, currentCascadeId);
   renderQuotaOverview();
+});
+
+document.addEventListener('cascade-selected', () => {
+  normalizeDrawerOverlayState();
 });
