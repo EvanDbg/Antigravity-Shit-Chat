@@ -19,6 +19,30 @@ let filePreviewRequestSeq = 0;
 let styleApplyRequestSeq = 0;
 let popupOpenRequestSeq = 0;
 
+const THEME_STORAGE_KEY = 'snapshot-theme';
+const THEME_META_COLORS = {
+  light: '#ffffff',
+  dark: '#0d1117'
+};
+const SNAPSHOT_THEME_FALLBACKS = {
+  light: {
+    bg: 'var(--snapshot-bg, #ffffff)',
+    fg: 'var(--snapshot-fg, #1f2328)',
+    heading: 'var(--snapshot-heading, #000000)',
+    preBg: 'var(--snapshot-pre-bg, #f0f2f5)',
+    codeBg: 'var(--snapshot-code-bg, #e3e6ea)',
+    codeFg: 'var(--snapshot-code-fg, #1f2328)'
+  },
+  dark: {
+    bg: 'var(--snapshot-bg, #0f0f0f)',
+    fg: 'var(--snapshot-fg, #e5e5e5)',
+    heading: 'var(--snapshot-heading, #f3f4f6)',
+    preBg: 'var(--snapshot-pre-bg, #111827)',
+    codeBg: 'var(--snapshot-code-bg, #0b1220)',
+    codeFg: 'var(--snapshot-code-fg, #e5e7eb)'
+  }
+};
+
 // Morphdom: loaded as UMD from vendor/
 const morphdomReady = new Promise((resolve) => {
   const script = document.createElement('script');
@@ -62,8 +86,93 @@ export function initChatView() {
     container.addEventListener('scroll', handleScrollSync);
   }
 
-  // Ensure saved theme is applied immediately on load
-  setSnapshotTheme(getSnapshotTheme());
+  bindSystemThemeListener();
+  setThemeMode(getThemeMode(), { force: true, persist: false });
+}
+
+function normalizeThemeMode(mode) {
+  return mode === 'light' || mode === 'dark' || mode === 'follow' ? mode : 'follow';
+}
+
+function getSystemThemeMode() {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch (_) {
+    return 'light';
+  }
+}
+
+function resolveShellTheme(mode) {
+  return mode === 'follow' ? getSystemThemeMode() : mode;
+}
+
+function applyShellTheme(mode) {
+  const nextMode = normalizeThemeMode(mode);
+  const effectiveMode = resolveShellTheme(nextMode);
+  const root = document.documentElement;
+  root.setAttribute('data-theme', effectiveMode);
+  root.style.colorScheme = effectiveMode;
+
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) {
+    metaTheme.setAttribute('content', THEME_META_COLORS[effectiveMode] || THEME_META_COLORS.light);
+  }
+
+  document.dispatchEvent(new CustomEvent('theme-mode-changed', {
+    detail: { mode: nextMode, effectiveMode }
+  }));
+}
+
+let systemThemeListenerBound = false;
+let themeSettleTimer = null;
+
+function enforceThemeMode(mode, options = {}) {
+  const { force = true } = options;
+  const nextMode = normalizeThemeMode(mode);
+  const effectiveMode = resolveShellTheme(nextMode);
+  applyShellTheme(nextMode);
+  setSnapshotTheme(nextMode === 'follow' ? effectiveMode : nextMode, { force, persist: false });
+}
+
+function scheduleThemeSettle(mode) {
+  if (themeSettleTimer) clearTimeout(themeSettleTimer);
+  const expectedMode = normalizeThemeMode(mode);
+  themeSettleTimer = setTimeout(() => {
+    themeSettleTimer = null;
+    const storedMode = normalizeThemeMode(localStorage.getItem(THEME_STORAGE_KEY) || expectedMode);
+    enforceThemeMode(storedMode, { force: true });
+  }, 90);
+}
+
+function bindSystemThemeListener() {
+  if (systemThemeListenerBound) return;
+  systemThemeListenerBound = true;
+
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = () => {
+    if (getThemeMode() !== 'follow') return;
+    const effectiveMode = resolveShellTheme('follow');
+    applyShellTheme('follow');
+    setSnapshotTheme(effectiveMode, { force: true, persist: false });
+  };
+  if (typeof media.addEventListener === 'function') media.addEventListener('change', onChange);
+  else if (typeof media.addListener === 'function') media.addListener(onChange);
+}
+
+export function setThemeMode(mode, options = {}) {
+  const { force = false, persist = true } = options;
+  const nextMode = normalizeThemeMode(mode);
+
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, nextMode);
+  }
+
+  enforceThemeMode(nextMode, { force });
+  scheduleThemeSettle(nextMode);
+}
+
+export function getThemeMode() {
+  return normalizeThemeMode(localStorage.getItem(THEME_STORAGE_KEY) || 'follow');
 }
 
 // ------------------------------------------------------------------
@@ -130,7 +239,7 @@ export async function applyCascadeStyles(id, signal) {
         }
 
         /* Global text-decoration reset — kill IDE underlines */
-        #chat-viewport, #chat-viewport * {
+        #chat-viewport:not(.theme-light):not(.theme-dark), #chat-viewport:not(.theme-light):not(.theme-dark) * {
           text-decoration: none !important;
         }
 
@@ -151,21 +260,31 @@ export async function applyCascadeStyles(id, signal) {
         }
 
         /* Text color inheritance */
-        #chat-viewport p, #chat-viewport span, #chat-viewport div,
-        #chat-viewport li, #chat-viewport td, #chat-viewport th,
-        #chat-viewport h1, #chat-viewport h2, #chat-viewport h3,
-        #chat-viewport h4, #chat-viewport h5, #chat-viewport h6,
-        #chat-viewport label, #chat-viewport a {
+        #chat-viewport:not(.theme-light):not(.theme-dark) p,
+        #chat-viewport:not(.theme-light):not(.theme-dark) span,
+        #chat-viewport:not(.theme-light):not(.theme-dark) div,
+        #chat-viewport:not(.theme-light):not(.theme-dark) li,
+        #chat-viewport:not(.theme-light):not(.theme-dark) td,
+        #chat-viewport:not(.theme-light):not(.theme-dark) th,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h1,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h2,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h3,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h4,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h5,
+        #chat-viewport:not(.theme-light):not(.theme-dark) h6,
+        #chat-viewport:not(.theme-light):not(.theme-dark) label,
+        #chat-viewport:not(.theme-light):not(.theme-dark) a {
           color: inherit;
         }
 
-        #cascade, #conversation, #chat {
+        #chat-viewport #cascade, #chat-viewport #conversation, #chat-viewport #chat {
           background: transparent !important;
           color: var(--theme-fc, ${editorFg}) !important;
         }
 
         /* Prose typography */
-        #chat-viewport .prose, #chat-viewport [class*="prose"] {
+        #chat-viewport:not(.theme-light):not(.theme-dark) .prose,
+        #chat-viewport:not(.theme-light):not(.theme-dark) [class*="prose"] {
           --tw-prose-body: var(--theme-fc, ${editorFg}) !important;
           --tw-prose-headings: var(--theme-heading, #f3f4f6) !important;
           --tw-prose-links: ${vars['--vscode-textLink-foreground'] || '#60a5fa'} !important;
@@ -176,11 +295,12 @@ export async function applyCascadeStyles(id, signal) {
         }
 
         /* Code blocks */
-        #chat-viewport pre, #chat-viewport code {
+        #chat-viewport:not(.theme-light):not(.theme-dark) pre,
+        #chat-viewport:not(.theme-light):not(.theme-dark) code {
           background: var(--theme-code-bg, #111) !important;
           color: var(--theme-code-fc, #ddd) !important;
         }
-        #chat-viewport pre code { background: transparent !important; }
+        #chat-viewport:not(.theme-light):not(.theme-dark) pre code { background: transparent !important; }
 
         /* Button/form reset */
         #chat-viewport button, #chat-viewport [type='button'] {
@@ -599,9 +719,6 @@ export async function updateContent(id, signal) {
 // ------------------------------------------------------------------
 // Global Popup ClickAway & Dynamic Positioning Variables
 // ------------------------------------------------------------------
-let lastClickedCdpIndex = null;
-let lastPopupIndex = 0;
-
 document.addEventListener('click', async (e) => {
   // Ignore clicks inside popups or on potential trigger elements
   if (e.target.closest('[data-portal-popup="true"], [role="menu"], [role="listbox"], .monaco-menu-container, .context-view, [data-radix-popper-content-wrapper], [data-cdp-click]')) {
@@ -795,7 +912,6 @@ async function handleCDPClick(e) {
     return;
   }
 
-  lastClickedCdpIndex = idx;
   fetch('/api/telemetry', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:'passing_cdp_click_to_backend', cdpId: idx})}).catch(()=>{});
 
   e.preventDefault();
@@ -1059,8 +1175,8 @@ function handleScrollSync() {
 // Theme override (three-mode) — idempotent, single source of truth
 // ------------------------------------------------------------------
 export function setSnapshotTheme(mode, options = {}) {
-  const { force = false } = options;
-  const nextMode = mode === 'light' || mode === 'dark' || mode === 'follow' ? mode : 'follow';
+  const { force = false, persist = true } = options;
+  const nextMode = normalizeThemeMode(mode);
   if (!shadowRoot) return;
   const viewport = shadowRoot.getElementById('chat-viewport');
   if (!viewport) return;
@@ -1078,23 +1194,25 @@ export function setSnapshotTheme(mode, options = {}) {
 
   viewport.classList.remove('theme-light', 'theme-dark');
   if (nextMode === 'light') {
+    const palette = SNAPSHOT_THEME_FALLBACKS.light;
     viewport.classList.add('theme-light');
     viewport.style.setProperty('color-scheme', 'light');
-    viewport.style.setProperty('--theme-bc', '#ffffff');
-    viewport.style.setProperty('--theme-fc', '#1f2328');
-    viewport.style.setProperty('--theme-heading', '#000000');
-    viewport.style.setProperty('--theme-pre-bg', '#f0f2f5');
-    viewport.style.setProperty('--theme-code-bg', '#e3e6ea');
-    viewport.style.setProperty('--theme-code-fc', '#1f2328');
+    viewport.style.setProperty('--theme-bc', palette.bg);
+    viewport.style.setProperty('--theme-fc', palette.fg);
+    viewport.style.setProperty('--theme-heading', palette.heading);
+    viewport.style.setProperty('--theme-pre-bg', palette.preBg);
+    viewport.style.setProperty('--theme-code-bg', palette.codeBg);
+    viewport.style.setProperty('--theme-code-fc', palette.codeFg);
   } else if (nextMode === 'dark') {
+    const palette = SNAPSHOT_THEME_FALLBACKS.dark;
     viewport.classList.add('theme-dark');
     viewport.style.setProperty('color-scheme', 'dark');
-    viewport.style.setProperty('--theme-bc', '#0f0f0f');
-    viewport.style.setProperty('--theme-fc', '#e5e5e5');
-    viewport.style.setProperty('--theme-heading', '#f3f4f6');
-    viewport.style.setProperty('--theme-pre-bg', '#111827');
-    viewport.style.setProperty('--theme-code-bg', '#0b1220');
-    viewport.style.setProperty('--theme-code-fc', '#e5e7eb');
+    viewport.style.setProperty('--theme-bc', palette.bg);
+    viewport.style.setProperty('--theme-fc', palette.fg);
+    viewport.style.setProperty('--theme-heading', palette.heading);
+    viewport.style.setProperty('--theme-pre-bg', palette.preBg);
+    viewport.style.setProperty('--theme-code-bg', palette.codeBg);
+    viewport.style.setProperty('--theme-code-fc', palette.codeFg);
   } else {
     viewport.style.removeProperty('color-scheme');
     viewport.style.removeProperty('--theme-bc');
@@ -1105,18 +1223,20 @@ export function setSnapshotTheme(mode, options = {}) {
     viewport.style.removeProperty('--theme-code-fc');
   }
 
-  localStorage.setItem('snapshot-theme', nextMode);
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, nextMode);
+  }
 }
 
 export function getSnapshotTheme() {
-  return localStorage.getItem('snapshot-theme') || 'follow';
+  return getThemeMode();
 }
 
 // ------------------------------------------------------------------
 // Listen for app events
 // ------------------------------------------------------------------
 document.addEventListener('theme-toggle', (e) => {
-  setSnapshotTheme(e.detail.mode);
+  setThemeMode(e.detail.mode, { force: true });
 });
 
 document.addEventListener('cascade-selected', (e) => {
@@ -1132,8 +1252,7 @@ document.addEventListener('cascade-selected', (e) => {
   applyCascadeStyles(currentId, signal);
   updateContent(currentId, signal);
 
-  // Restore saved theme
-  setSnapshotTheme(getSnapshotTheme());
+  setThemeMode(getThemeMode(), { force: true, persist: false });
 });
 
 document.addEventListener('snapshot-update', (e) => {

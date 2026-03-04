@@ -20,7 +20,7 @@ table {
 /* --- Thinking / thought process area marker --- */
 [class*="thinking"], [class*="thought"],
 [data-thinking], [data-thought] {
-  border-left: 3px solid #d0d7de;
+  border-left: 3px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
   padding-left: 12px;
   margin-left: 4px;
   opacity: 0.85;
@@ -52,7 +52,7 @@ table {
 
 [data-file-name]:active {
   text-decoration-color: rgba(9, 105, 218, 0.8);
-  color: #0969da !important;
+  color: var(--vscode-textLink-foreground, #0969da) !important;
 }
 
 /* --- Image max-width --- */
@@ -115,7 +115,7 @@ button[aria-label*="copy"]:active,
    3. Ensuring the inner card has solid background
    ============================================ */
 .fixed.inset-0[class*="bg-black"] {
-  background-color: rgba(0, 0, 0, 0.92) !important;
+  background-color: color-mix(in srgb, var(--theme-bc, #0f0f0f) 92%, #000000) !important;
   z-index: 9999 !important;
   isolation: isolate;
 }
