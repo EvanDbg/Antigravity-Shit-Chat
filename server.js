@@ -1336,8 +1336,16 @@ async function main() {
             if (!resp.ok) return res.status(resp.status).json({ error: `Manager returned ${resp.status}` });
             // Verify switch
             const currentResp = await fetch(`${MANAGER_URL}/api/accounts/current`, { headers: managerHeaders() });
+            if (!currentResp.ok) {
+                return res.status(currentResp.status).json({ error: `Manager returned ${currentResp.status} during verification` });
+            }
             const current = await currentResp.json();
-            console.log(`🔄 Account switched to: ${current.email}`);
+            const verifiedId = current?.accountId || current?.account_id || current?.id || current?.account?.id || current?.current_account?.id || current?.currentAccount?.id;
+            if (verifiedId && verifiedId !== accountId) {
+                return res.status(502).json({ error: 'Manager verification did not match requested account' });
+            }
+            const verifiedEmail = current?.email || current?.account?.email || current?.current_account?.email || current?.currentAccount?.email || verifiedId || 'unknown';
+            console.log(`🔄 Account switched to: ${verifiedEmail}`);
             res.json({ success: true, current });
         } catch (e) {
             console.error('Manager switch error:', e.message);
