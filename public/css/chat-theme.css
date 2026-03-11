@@ -108,6 +108,23 @@
   color: #1f2328 !important;
 }
 
+#chat-viewport.theme-light .monaco-scrollable-element,
+#chat-viewport.theme-light .monaco-list,
+#chat-viewport.theme-light .monaco-list-rows,
+#chat-viewport.theme-light [class*="monaco-list"],
+#chat-viewport.theme-light [class*="conversation"],
+#chat-viewport.theme-light [class*="history"] {
+  background-color: var(--theme-bc, #ffffff) !important;
+  color: var(--theme-fc, #1f2328) !important;
+}
+
+#chat-viewport.theme-light .monaco-list-row,
+#chat-viewport.theme-light [class*="monaco-list-row"],
+#chat-viewport.theme-light [role="listitem"] {
+  background-color: transparent !important;
+  color: var(--theme-fc, #1f2328) !important;
+}
+
 #chat-viewport.theme-light, #chat-viewport.theme-light * {
   text-decoration: none !important;
 }

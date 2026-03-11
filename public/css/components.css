@@ -242,12 +242,12 @@
 }
 
 .cyber-toast {
-  background: rgba(15, 15, 15, 0.92);
+  background: var(--toast-bg, rgba(15, 15, 15, 0.92));
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--popup-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-md);
   padding: 12px 16px;
-  color: #e5e5e5;
+  color: var(--toast-fg, #e5e5e5);
   cursor: pointer;
   pointer-events: auto;
   animation: toastIn 0.3s ease;
@@ -269,13 +269,13 @@
 .cyber-toast-title {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: #4ade80;
+  color: var(--toast-accent, #4ade80);
   margin-bottom: 2px;
 }
 
 .cyber-toast-body {
   font-size: var(--text-xs);
-  color: #aaa;
+  color: var(--surface-muted-fg, #aaa);
 }
 
 .cyber-toast-indicator {
@@ -283,7 +283,7 @@
   bottom: 0;
   left: 0;
   height: 2px;
-  background: linear-gradient(90deg, #4ade80, #22d3ee);
+  background: linear-gradient(90deg, var(--toast-accent, #4ade80), var(--toast-accent-alt, #22d3ee));
   animation: toastProgress 3s linear;
   width: 0%;
 }
@@ -593,13 +593,15 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px var(--space-sm);
+  background: var(--surface-elevated-bg, var(--bg-secondary));
+  border: 1px solid var(--border-light, var(--border));
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast);
 }
 
 .settings-item:active {
-  background: var(--bg-secondary);
+  background: var(--surface-muted-bg, var(--bg-tertiary));
 }
 
 .settings-item-label {
@@ -609,7 +611,7 @@
 
 .settings-item-value {
   font-size: var(--text-xs);
-  color: var(--text-muted);
+  color: var(--surface-muted-fg, var(--text-secondary));
 }
 
 /* ============================================
@@ -632,24 +634,15 @@
   z-index: 99999;
   max-width: 320px;
   min-width: 200px;
-  /* Use fixed fallback colors since var(--vscode-editor-background) isn't in main document */
-  background: #1e1e1e; /* Dark theme fallback */
-  color: #cccccc;
-  border: 1px solid rgba(128, 128, 128, 0.2);
+  background: var(--popup-bg, var(--overlay-card-bg, var(--bg-secondary, #161b22)));
+  color: var(--popup-fg, var(--overlay-card-fg, var(--text-primary, #e6edf3)));
+  border: 1px solid var(--popup-border, var(--overlay-card-border, rgba(128, 128, 128, 0.2)));
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg, 0 8px 32px rgba(0, 0, 0, 0.25));
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Auto-adapt to light theme if system prefers it */
-@media (prefers-color-scheme: light) {
-  .mobile-popup-bubble {
-    background: #ffffff;
-    color: #333333;
-  }
 }
 
 .mobile-popup-bubble::after {
@@ -663,22 +656,12 @@
 }
 .mobile-popup-bubble.arrow-up::after {
   top: -12px;
-  border-color: transparent transparent var(--bg-tertiary, #1e1e1e) transparent;
-}
-@media (prefers-color-scheme: light) {
-  .mobile-popup-bubble.arrow-up::after {
-    border-color: transparent transparent #ffffff transparent;
-  }
+  border-color: transparent transparent var(--popup-bg, var(--overlay-card-bg, var(--bg-secondary, #161b22))) transparent;
 }
 
 .mobile-popup-bubble.arrow-down::after {
   bottom: -12px;
-  border-color: var(--bg-tertiary, #1e1e1e) transparent transparent transparent;
-}
-@media (prefers-color-scheme: light) {
-  .mobile-popup-bubble.arrow-down::after {
-    border-color: #ffffff transparent transparent transparent;
-  }
+  border-color: var(--popup-bg, var(--overlay-card-bg, var(--bg-secondary, #161b22))) transparent transparent transparent;
 }
 
 .mobile-popup-header {
@@ -690,7 +673,7 @@
 
 .mobile-popup-item {
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+  border-bottom: 1px solid color-mix(in srgb, var(--popup-fg, #cccccc) 12%, transparent);
   cursor: pointer;
 }
 .mobile-popup-item:last-child {
@@ -702,7 +685,7 @@
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .mobile-popup-item:active {
-  background: rgba(128, 128, 128, 0.2);
+  background: color-mix(in srgb, var(--popup-fg, #cccccc) 20%, transparent);
 }
 
 .mobile-popup-title {
@@ -717,7 +700,7 @@
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 9999px;
-  background: rgba(128, 128, 128, 0.15);
+  background: color-mix(in srgb, var(--popup-fg, #cccccc) 15%, transparent);
   font-weight: 500;
   opacity: 0.9;
 }
@@ -728,4 +711,3 @@
   margin-top: 2px;
   line-height: 1.3;
 }
-

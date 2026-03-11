@@ -1,7 +1,7 @@
 /**
  * Settings — "More" view with theme toggle, accounts, notifications
  */
-import { getSnapshotTheme } from './chat.js';
+import { getThemeMode } from './chat.js';
 import { escapeHtml, urlBase64ToUint8Array } from './utils.js';
 import { showToast } from './toast.js';
 
@@ -23,14 +23,17 @@ document.addEventListener('DOMContentLoaded', () => {
     updateThemeLabel(themeText);
     themeBtn.addEventListener('click', () => {
       const modes = ['follow', 'light', 'dark'];
-      const cur = getSnapshotTheme();
+      const cur = getThemeMode();
       const next = modes[(modes.indexOf(cur) + 1) % modes.length];
       
       // Dispatch event — chat.js owns setSnapshotTheme + localStorage (single source of truth)
       document.dispatchEvent(new CustomEvent('theme-toggle', { detail: { mode: next } }));
-      updateThemeLabel(themeText);
     });
   }
+
+  document.addEventListener('theme-mode-changed', () => {
+    updateThemeLabel(themeText);
+  });
 
   // Account modal
   document.getElementById('accountBtn')?.addEventListener('click', openAccountModal);
@@ -43,8 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function updateThemeLabel(el) {
   if (!el) return;
-  const mode = getSnapshotTheme();
-  const labels = { follow: 'Follow IDE', light: 'Light', dark: 'Dark' };
+  const mode = getThemeMode();
+  const labels = { follow: 'Follow System', light: 'Light', dark: 'Dark' };
   el.textContent = labels[mode] || mode;
 }
 

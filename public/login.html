@@ -7,7 +7,7 @@
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Login — Antigravity Remote Dev</title>
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#3b82f6">
+    <meta name="theme-color" content="#0d1117">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -18,11 +18,53 @@
             box-sizing: border-box;
         }
 
+        :root {
+            color-scheme: light dark;
+            --login-bg: #ffffff;
+            --login-fg: #1f2328;
+            --login-card-bg: #f6f8fa;
+            --login-card-border: #d1d9e0;
+            --login-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            --login-subtle: #656d76;
+            --login-muted: #8b949e;
+            --login-input-bg: #ffffff;
+            --login-input-border: #d1d9e0;
+            --login-input-fg: #1f2328;
+            --login-focus: #0969da;
+            --login-primary-a: #3b82f6;
+            --login-primary-b: #6366f1;
+            --login-title-a: #3b82f6;
+            --login-title-b: #7c3aed;
+            --login-error: #d1242f;
+            --login-theme-color: #ffffff;
+        }
+
+        :root[data-theme="dark"] {
+            color-scheme: dark;
+            --login-bg: #0d1117;
+            --login-fg: #e6edf3;
+            --login-card-bg: #161b22;
+            --login-card-border: #30363d;
+            --login-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            --login-subtle: #9da7b3;
+            --login-muted: #7d8590;
+            --login-input-bg: #0d1117;
+            --login-input-border: #30363d;
+            --login-input-fg: #e6edf3;
+            --login-focus: #2f81f7;
+            --login-primary-a: #3b82f6;
+            --login-primary-b: #6366f1;
+            --login-title-a: #60a5fa;
+            --login-title-b: #a78bfa;
+            --login-error: #f85149;
+            --login-theme-color: #0d1117;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0d0d0d;
-            color: #e5e7eb;
-            height: 100vh;
+            background: var(--login-bg);
+            color: var(--login-fg);
+            min-height: 100vh;
             height: 100dvh;
             display: flex;
             align-items: center;
@@ -30,27 +72,27 @@
         }
 
         .login-card {
-            background: #1a1a1a;
-            border: 1px solid #2a2a2a;
+            background: var(--login-card-bg);
+            border: 1px solid var(--login-card-border);
             border-radius: 16px;
             padding: 40px 36px;
             width: 100%;
             max-width: 380px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            box-shadow: var(--login-shadow);
         }
 
         .login-card h1 {
             font-size: 22px;
             font-weight: 700;
             margin-bottom: 6px;
-            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            background: linear-gradient(135deg, var(--login-title-a), var(--login-title-b));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
         .login-card p {
             font-size: 13px;
-            color: #666;
+            color: var(--login-subtle);
             margin-bottom: 28px;
         }
 
@@ -61,7 +103,7 @@
         .field label {
             display: block;
             font-size: 12px;
-            color: #888;
+            color: var(--login-muted);
             margin-bottom: 6px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -70,26 +112,26 @@
         .field input {
             width: 100%;
             padding: 12px 14px;
-            background: #111;
-            border: 1px solid #333;
+            background: var(--login-input-bg);
+            border: 1px solid var(--login-input-border);
             border-radius: 8px;
-            color: #fff;
+            color: var(--login-input-fg);
             font-size: 15px;
             outline: none;
             transition: border-color 0.2s;
         }
 
         .field input:focus {
-            border-color: #3b82f6;
+            border-color: var(--login-focus);
         }
 
         .login-btn {
             width: 100%;
             padding: 12px;
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            background: linear-gradient(135deg, var(--login-primary-a), var(--login-primary-b));
             border: none;
             border-radius: 8px;
-            color: #fff;
+            color: #ffffff;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
@@ -110,7 +152,7 @@
         }
 
         .error-msg {
-            color: #f87171;
+            color: var(--login-error);
             font-size: 13px;
             margin-top: 12px;
             text-align: center;
@@ -134,7 +176,7 @@
         <form id="loginForm">
             <div class="field">
                 <label>Password</label>
-                <input type="password" id="password" autocomplete="current-password" autofocus required>
+                <input type="password" id="password" autocomplete="current-password" required>
             </div>
             <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
         </form>
@@ -145,6 +187,56 @@
         const form = document.getElementById('loginForm');
         const errorMsg = document.getElementById('errorMsg');
         const loginBtn = document.getElementById('loginBtn');
+        const passwordInput = document.getElementById('password');
+
+        const THEME_STORAGE_KEY = 'snapshot-theme';
+        const THEME_COLORS = {
+            light: '#ffffff',
+            dark: '#0d1117'
+        };
+
+        function normalizeThemeMode(mode) {
+            return mode === 'light' || mode === 'dark' || mode === 'follow' ? mode : 'follow';
+        }
+
+        function getSystemThemeMode() {
+            try {
+                return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            } catch (_) {
+                return 'light';
+            }
+        }
+
+        function resolveTheme(mode) {
+            return mode === 'follow' ? getSystemThemeMode() : mode;
+        }
+
+        function applyTheme() {
+            const storedMode = normalizeThemeMode(localStorage.getItem(THEME_STORAGE_KEY) || 'follow');
+            const effectiveMode = resolveTheme(storedMode);
+            document.documentElement.setAttribute('data-theme', effectiveMode);
+            document.documentElement.style.colorScheme = effectiveMode;
+
+            const themeMeta = document.querySelector('meta[name="theme-color"]');
+            if (themeMeta) {
+                themeMeta.setAttribute('content', THEME_COLORS[effectiveMode] || THEME_COLORS.light);
+            }
+        }
+
+        applyTheme();
+        passwordInput?.focus();
+
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const onSystemThemeChange = () => {
+            const storedMode = normalizeThemeMode(localStorage.getItem(THEME_STORAGE_KEY) || 'follow');
+            if (storedMode === 'follow') applyTheme();
+        };
+        if (typeof media.addEventListener === 'function') media.addEventListener('change', onSystemThemeChange);
+        else if (typeof media.addListener === 'function') media.addListener(onSystemThemeChange);
+
+        window.addEventListener('storage', (e) => {
+            if (e.key === THEME_STORAGE_KEY) applyTheme();
+        });
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
