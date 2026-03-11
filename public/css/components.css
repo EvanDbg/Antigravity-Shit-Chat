@@ -409,20 +409,54 @@
 }
 
 /* --- Account item in modal --- */
-.account-card {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
+.account-current-banner {
+  margin-bottom: var(--space-md);
   padding: var(--space-md);
+  background: var(--surface-elevated-bg);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  margin-bottom: var(--space-sm);
+}
+
+.account-current-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--space-xs);
+}
+
+.account-current-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: var(--leading-tight);
+}
+
+.account-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.account-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  width: 100%;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  text-align: left;
+  transition: background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
 }
 
 .account-card:active {
   background: var(--bg-secondary);
+}
+
+.account-card:disabled {
+  cursor: default;
 }
 
 .account-card.current {
@@ -430,8 +464,16 @@
   background: var(--accent-bg);
 }
 
-.account-email {
+.account-card.switching {
+  opacity: 0.7;
+}
+
+.account-card-main {
   flex: 1;
+  min-width: 0;
+}
+
+.account-email {
   font-size: var(--text-sm);
   font-weight: 500;
   overflow: hidden;
@@ -442,6 +484,89 @@
 .account-tier {
   font-size: var(--text-xs);
   color: var(--text-muted);
+  margin-top: var(--space-xs);
+}
+
+.account-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+.account-quota-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-light);
+}
+
+.account-card.current .account-quota-list {
+  border-top-color: color-mix(in srgb, var(--accent) 22%, var(--border-light));
+}
+
+.account-quota-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+.account-quota-model {
+  color: var(--text-secondary);
+  min-width: 0;
+  flex: 1;
+}
+
+.account-quota-value {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.account-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-full);
+  background: var(--surface-elevated-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+.account-card.current .account-meta-chip {
+  background: var(--bg-primary);
+}
+
+.account-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-full);
+  background: var(--surface-elevated-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.account-badge.current {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.account-badge.switching {
+  background: var(--warning-bg);
+  color: var(--warning);
 }
 
 /* --- Settings list (More view) --- */
